@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>X Voice Agent</title>
+  <link rel="icon" href="../assets/icons/icon-32.png">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-shell">
+    <header class="topbar">
+      <div class="product-title">
+        <img src="../assets/icons/icon-48.png" alt="" class="product-logo">
+        <div>
+          <div class="eyebrow">Personal X Voice Agent</div>
+          <h1>发声控制台</h1>
+        </div>
+      </div>
+      <button id="settingsBtn" class="icon-btn" title="策略中心">设置</button>
+    </header>
+
+    <section class="agent-status">
+      <div class="status-line">
+        <span class="status-indicator" id="statusIndicator"></span>
+        <span id="statusText">已停止</span>
+      </div>
+      <button id="toggleBtn" class="btn-main">启动 Agent</button>
+    </section>
+
+    <section class="readiness">
+      <div class="section-head">
+        <span>今日发声计划</span>
+        <a href="../logs/logs.html" target="_blank" id="logLink">成果记录</a>
+      </div>
+      <div class="metric-grid">
+        <div class="metric">
+          <span class="metric-label">X 官方草稿</span>
+          <strong id="xDraftCount">未读取</strong>
+          <button id="refreshDraftCountBtn" class="metric-action" type="button">读取</button>
+        </div>
+        <div class="metric">
+          <span class="metric-label">下次交付</span>
+          <strong id="nextPostTime">暂无计划</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">AI 状态</span>
+          <strong id="genStatus">待机</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">互动次数</span>
+          <strong id="repliesSent">0</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="voice-card">
+      <div class="section-head">
+        <span>AI 增长策略信号</span>
+        <span class="soft-tag">Strategy</span>
+      </div>
+      <div id="strategySignal" class="strategy-signal">
+        <div class="signal-empty">请先完成设置页的一键分析。</div>
+      </div>
+    </section>
+
+    <section class="pipeline">
+      <div class="pipeline-item" id="stepConfig">
+        <span class="step-dot"></span>
+        <div>
+          <strong>策略配置</strong>
+          <p>明确目标用户、内容方向和引流边界</p>
+        </div>
+      </div>
+      <div class="pipeline-item" id="stepPersona">
+        <span class="step-dot"></span>
+        <div>
+          <strong>人设校准</strong>
+          <p>基于 AI 分析生成账号角色、爆款风格和表达边界</p>
+        </div>
+      </div>
+      <div class="pipeline-item" id="stepQueue">
+        <span class="step-dot"></span>
+        <div>
+          <strong>内容准备</strong>
+          <p>生成内容后写入 X 官方草稿或定时器；不再用本地队列冒充草稿数</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="stats">
+      <div>
+        <span class="stat-label">已处理推文</span>
+        <span class="stat-value" id="tweetsProcessed">0</span>
+      </div>
+      <div>
+        <span class="stat-label">Agent 模式</span>
+        <span class="stat-value" id="modeText">人审优先</span>
+      </div>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

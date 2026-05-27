@@ -1,0 +1,15 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+
+# Node
+node_modules/
+
+# Temp files
+*.log
+*.tmp
+update_i18n.js
