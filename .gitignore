@@ -9,7 +9,14 @@ Thumbs.db
 # Node
 node_modules/
 
-# Temp files
+# Temp/dev scripts
 *.log
 *.tmp
-update_i18n.js
+fix_*.js
+patch_*.js
+update_*.js
+remove_login.js
+upgrade_viral_prompt.js
+x_scraper_patch.js
+callLLM.txt
+test-textarea.html
