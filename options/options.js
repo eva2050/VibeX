@@ -355,7 +355,7 @@ function bindActions() {
       const text = resultBoxUI.innerText.trim();
       if (!text || text === '✨ 正在生成爆款文案...') return;
       navigator.clipboard.writeText(text).then(() => {
-        showToast('✨ 文案已复制', 'system');
+        showToast(t('toast_copied'), 'system');
       }).catch(err => {
         addLog(t('log_copy_fail') + ': ' + err.message, 'error');
       });
@@ -671,7 +671,7 @@ function renderVault(vault) {
       
       if (textToInject) {
         navigator.clipboard.writeText(textToInject).then(() => {
-          showToast('✨ 文案已复制', 'system');
+          showToast(t('toast_copied'), 'system');
         }).catch(err => {
           addLog('复制失败: ' + err.message, 'error');
         });

@@ -2755,8 +2755,41 @@ function injectStyles() {
   `;
   (document.head || document.documentElement).appendChild(style);
 }
+// Simple localization for content script
+function tUI(msg) {
+  const lang = botState.engineLanguage || 'zh';
+  if (lang === 'zh') return msg;
+  
+  const dict = {
+    '❌ 无法提取推文文字内容': '❌ Failed to extract tweet text',
+    '❌ 生成失败: ': '❌ Generation failed: ',
+    '❌ 收录失败：扩展后台未就绪': '❌ Save failed: extension backend not ready',
+    'ℹ️ 该推文已被收录': 'ℹ️ Tweet already saved',
+    '📥 成功收录至烤仔灵感库！': '📥 Successfully saved to Vault!',
+    '❌ 收录失败: ': '❌ Save failed: ',
+    '✅ 内容已填入': '✅ Content filled',
+    '❌ 未找到输入框，请手动粘贴': '❌ Input box not found, please paste manually',
+    '✅ 回复已自动填入！': '✅ Reply auto-filled!',
+    '❌ 未找到该推文的回复按钮': '❌ Reply button not found',
+    '❌ 页面已刷新或推文不在视野内': '❌ Page refreshed or tweet out of view',
+    '未知错误': 'Unknown error',
+    '仿写': 'Rewrite',
+    '回复': 'Reply',
+    '一键仿写': 'One-click Rewrite',
+    '智能回复': 'Smart Reply'
+  };
+
+  let res = msg;
+  for (const [zh, en] of Object.entries(dict)) {
+    if (res.includes(zh)) {
+      res = res.replace(zh, en);
+    }
+  }
+  return res;
+}
 
 function showToast(message, type = 'success') {
+  message = tUI(message);
   let container = document.getElementById('x-bot-toast-container');
   if (!container) {
     container = document.createElement('div');
@@ -2803,18 +2836,18 @@ function injectCollectButtons() {
       const wrapper = document.createElement('div');
       wrapper.className = 'x-bot-collect-btn-wrapper';
     wrapper.innerHTML = `
-      <button class="x-bot-collect-btn rewrite-btn" aria-label="一键仿写">
+      <button class="x-bot-collect-btn rewrite-btn" aria-label="${tUI('一键仿写')}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
         </svg>
-        仿写
+        ${tUI('仿写')}
       </button>
-      <button class="x-bot-collect-btn reply-btn" aria-label="智能回复">
+      <button class="x-bot-collect-btn reply-btn" aria-label="${tUI('智能回复')}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;">
           <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
         </svg>
-        回复
+        ${tUI('回复')}
       </button>
     `;
     
