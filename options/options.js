@@ -125,7 +125,7 @@ function loadMemory() {
     apiKey: '',
     replyStrategy: '',
     styleTrainingData: '',
-    engineLanguage: 'zh',
+    engineLanguage: 'en',
     uiTheme: 'auto',
     draftVault: []
   }, (items) => {
@@ -163,7 +163,7 @@ function loadMemory() {
     
     const langInput = document.getElementById('engine-language');
     if (langInput) {
-      langInput.value = items.engineLanguage || 'zh';
+      langInput.value = items.engineLanguage || 'en';
       const opt = document.querySelector(`#engine-language-container .custom-select-option[data-value="${langInput.value}"]`);
       if (opt) {
         document.querySelector('#engine-language-trigger span').textContent = opt.textContent;
@@ -184,7 +184,7 @@ function loadMemory() {
     }
     
     applyTheme(items.uiTheme || 'auto');
-    applyLanguage(items.engineLanguage || 'zh');
+    applyLanguage(items.engineLanguage || 'en');
     
     updatePreflightStatus(items.apiKey);
     renderVault(items.draftVault);
@@ -196,7 +196,7 @@ function saveMemory() {
   const target = document.getElementById('reply-strategy').value.trim();
   const styleTrainingData = Array.from(document.querySelectorAll('#style-training-list textarea')).map(t => t.value.trim()).filter(t => t !== '');
   const langInput = document.getElementById('engine-language');
-  const engineLanguage = langInput ? langInput.value : 'zh';
+  const engineLanguage = langInput ? langInput.value : 'en';
   
   const themeInput = document.getElementById('ui-theme');
   const uiTheme = themeInput ? themeInput.value : 'auto';
@@ -1082,7 +1082,7 @@ function applyLanguage(lang) {
   if (lang === 'auto') {
     lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
   }
-  const dict = i18nDict[lang] || i18nDict.zh;
+  const dict = i18nDict[lang] || i18nDict.en;
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const key = el.getAttribute('data-i18n');
     if (dict[key]) {
