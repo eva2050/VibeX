@@ -1590,7 +1590,7 @@ function showChatTypingIndicator(show) {
     const typingRow = document.createElement('div');
     typingRow.className = 'x-bot-chat-msg-row assistant x-chat-typing-row';
     typingRow.innerHTML = `
-      <span class="x-bot-chat-msg-label">烤仔正在思考...</span>
+      <span class="x-bot-chat-msg-label">${tUI('烤仔正在思考...')}</span>
       <div class="x-bot-chat-msg-bubble x-chat-typing" style="display:flex;">
         <div class="x-bot-chat-typing-dot"></div>
         <div class="x-bot-chat-typing-dot"></div>
@@ -2776,7 +2776,9 @@ function tUI(msg) {
     '仿写': 'Rewrite',
     '回复': 'Reply',
     '一键仿写': 'One-click Rewrite',
-    '智能回复': 'Smart Reply'
+    '智能回复': 'Smart Reply',
+    '烤仔正在思考...': 'Vibe-X is thinking...',
+    'AI 正在思考...': 'AI is thinking...'
   };
 
   let res = msg;
@@ -2916,7 +2918,7 @@ function injectCollectButtons() {
             streamBubble = document.createElement('div');
             streamBubble.style.cssText = 'position:fixed;bottom:120px;right:24px;width:320px;background:var(--primary, #0F0F0F);color:#fff;padding:16px;border-radius:16px;z-index:999999;box-shadow:0 12px 40px rgba(0,0,0,0.4);font-size:14px;line-height:1.6;max-height:400px;overflow-y:auto;border:1px solid rgba(255,255,255,0.1);white-space:pre-wrap;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
             const header = document.createElement('div');
-            header.innerHTML = '<span style="color:#00BA7C;margin-right:8px;">✨</span>AI 正在思考...';
+            header.innerHTML = '<span style="color:#00BA7C;margin-right:8px;">✨</span>' + tUI('AI 正在思考...');
             header.style.cssText = 'font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:8px;font-weight:600;display:flex;align-items:center;';
             streamBubble.appendChild(header);
             const content = document.createElement('div');
@@ -3328,7 +3330,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         streamBubble.style.cssText = 'position:fixed;bottom:120px;right:24px;width:320px;background:var(--primary, #0F0F0F);color:#fff;padding:16px;border-radius:16px;z-index:999999;box-shadow:0 12px 40px rgba(0,0,0,0.4);font-size:14px;line-height:1.6;max-height:400px;overflow-y:auto;border:1px solid rgba(255,255,255,0.1);white-space:pre-wrap;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
         
         const header = document.createElement('div');
-        header.innerHTML = '<span style="color:#00BA7C;margin-right:8px;">✨</span>AI 正在思考...';
+        header.innerHTML = '<span style="color:#00BA7C;margin-right:8px;">✨</span>' + tUI('AI 正在思考...');
         header.style.cssText = 'font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:8px;font-weight:600;display:flex;align-items:center;';
         streamBubble.appendChild(header);
         
