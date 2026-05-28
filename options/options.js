@@ -42,7 +42,7 @@ function recordFeedbackLoop(original, modified, context) {
     if (feedback.length > 10) feedback.shift();
     
     chrome.storage.local.set({ feedbackLoopData: feedback }, () => {
-      addLog('AI 进化反馈已记录，模型将在下次生成时进行纠偏。', 'system');
+      addLog(t('log_feedback'), 'system');
     });
   });
 }
@@ -211,7 +211,7 @@ function saveMemory() {
     }, () => {
       applyTheme(uiTheme);
       applyLanguage(engineLanguage);
-      addLog('系统配置已更新。', 'system');
+      addLog(t('log_config_updated'), 'system');
       updatePreflightStatus(apiKey);
       
       // Toast notification instead of button
@@ -224,7 +224,7 @@ function saveMemory() {
       // Clear any existing timeout to prevent premature removal
       if (window.saveToastTimeout) clearTimeout(window.saveToastTimeout);
       
-      existingToast.textContent = '✨ 已保存';
+      existingToast.textContent = t('toast_saved');
       existingToast.style.cssText = 'position:fixed;top:24px;right:24px;background:var(--primary);color:var(--bg-color);padding:6px 12px;border-radius:16px;font-size:12px;font-weight:600;box-shadow:var(--shadow-float);z-index:10000;transition:opacity 0.2s;opacity:1;';
       
       window.saveToastTimeout = setTimeout(() => {
@@ -303,9 +303,9 @@ function handleNewContext(type, data) {
   currentContext = { type, data };
   
   if (type === 'tweet') {
-    addLog('自动捕获当前推文 (后台待命)', 'system');
+    addLog(t('log_auto_capture'), 'system');
   } else if (type === 'profile') {
-    addLog(`锁定账号分析: ${data.author}`, 'system');
+    addLog(`${t('log_account_lock')}: ${data.author}`, 'system');
     
     // Auto switch to persona view
     document.querySelector('.nav-item[data-view="view-persona"]').click();
@@ -347,7 +347,7 @@ function bindActions() {
       if (lastActionType) {
         executeMagicAction(lastActionType, true);
       } else {
-        addLog('无上下文可重新生成', 'error');
+        addLog(t('log_no_context'), 'error');
       }
     });
   }
@@ -360,7 +360,7 @@ function bindActions() {
       navigator.clipboard.writeText(text).then(() => {
         showToast('✨ 文案已复制', 'system');
       }).catch(err => {
-        addLog('复制失败: ' + err.message, 'error');
+        addLog(t('log_copy_fail') + ': ' + err.message, 'error');
       });
     });
   }
@@ -396,7 +396,7 @@ function bindActions() {
   document.getElementById('btn-manual-rewrite').addEventListener('click', () => {
     const val = document.getElementById('manual-input').value.trim();
     if (!val) {
-      addLog('请输入外部素材', 'error');
+      addLog(t('log_enter_material'), 'error');
       return;
     }
     // Simulate new context
@@ -431,7 +431,7 @@ function bindActions() {
     if (chrome.storage) {
       chrome.storage.local.set({ isRunning: isEnabled, isAutoPaused: !isEnabled });
     }
-    addLog(isEnabled ? '自动任务已启动，开始全天候监听。' : '自动任务已暂停。', isEnabled ? 'system' : 'error');
+    addLog(isEnabled ? t('log_engine_start') : t('log_engine_stop'), isEnabled ? 'system' : 'error');
   });
   
   if (chrome.storage) {
@@ -462,7 +462,7 @@ function updateEngineBadge(isEnabled) {
 function executeMagicAction(actionType, isRegenerate = false) {
   lastActionType = actionType;
   if (!currentContext.data) {
-    addLog('请先捕获内容后再执行操作', 'error');
+    addLog(t('log_no_content'), 'error');
   }
   
   const apiKey = document.getElementById('api-key-input').value.trim();
@@ -471,7 +471,7 @@ function executeMagicAction(actionType, isRegenerate = false) {
   const isUrl = urlRegex.test(textContent);
 
   if (!apiKey && !isUrl) {
-    addLog('缺少 API Key，任务终止', 'error');
+    addLog(t('log_no_apikey'), 'error');
     return;
   }
 
@@ -487,10 +487,10 @@ function executeMagicAction(actionType, isRegenerate = false) {
   const loadingTextEl = loader.querySelector('div:last-child');
   if (isUrl) {
     if (loadingTextEl) loadingTextEl.textContent = '正在提取并解析 URL 内容...';
-    addLog(`[执行中] 探测到 URL，启动深度抓取任务...`, 'system');
+    addLog(t('log_url_detect'), 'system');
   } else {
     if (loadingTextEl) loadingTextEl.textContent = '✨ 正在生成爆款文案...';
-    addLog(`[执行中] 正在执行任务: ${actionType}`, 'system');
+    addLog(`${t('log_executing')}: ${actionType}`, 'system');
   }
 
   // Send request to background script
@@ -505,11 +505,11 @@ function executeMagicAction(actionType, isRegenerate = false) {
       loader.classList.add('hidden');
       if (chrome.runtime.lastError || !response || response.error) {
         resultBox.textContent = '生成失败: ' + (chrome.runtime.lastError?.message || response?.error || response?.message);
-        addLog('任务失败。', 'error');
+        addLog(t('log_task_fail'), 'error');
       } else {
         resultBox.textContent = response.result;
         originalAIOutput = response.result;
-        addLog(`任务完成。生成长度: ${response.result.length}`, 'system');
+        addLog(`${t('log_task_done')}: ${response.result.length}`, 'system');
         
         // Auto-Persist removed per user request
       }
@@ -522,7 +522,7 @@ function executeMagicAction(actionType, isRegenerate = false) {
     setTimeout(() => {
       loader.classList.add('hidden');
       resultBox.value = "这是一个模拟生成的回复，充满了智慧和幽默。";
-      addLog('模拟任务完成。', 'system');
+      addLog(t('log_sim_done'), 'system');
     }, 2000);
   }
 }
@@ -543,7 +543,7 @@ function saveToVault(generatedText, originalOutput = '') {
       savedAt: Date.now()
     });
     chrome.storage.local.set({ draftVault: vault }, () => {
-      addLog(`✨ 已自动无感存入储备库`, 'system');
+      addLog(`✨ ${t('log_auto_saved')}`, 'system');
       // Toast notification instead of button modification
       const toast = document.createElement('div');
       toast.textContent = '✨ 自动存入储备库';
@@ -566,7 +566,7 @@ function renderVault(vault) {
   }
   
   if (!vault || vault.length === 0) {
-    feed.innerHTML = '<div style="color:#86868b;text-align:center;padding:40px 0;font-size:13px;">储备库空空如也，快去收集和洗稿吧！</div>';
+    feed.innerHTML = `<div style="color:#86868b;text-align:center;padding:40px 0;font-size:13px;">${t('vault_empty')}</div>`;
     return;
   }
 
@@ -574,9 +574,12 @@ function renderVault(vault) {
     const div = document.createElement('div');
     div.className = 'vault-card';
     
-    // Format date: Month and Day only e.g. 5月25日
+    // Format date based on language
     const date = new Date(item.savedAt || Date.now());
-    const dateStr = date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+    const lang = getCurrentLang();
+    const dateStr = lang === 'en' 
+      ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      : date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
     
     // Extract title (first line or first 30 chars)
     let title = item.text.split('\n')[0].substring(0, 40);
@@ -592,8 +595,8 @@ function renderVault(vault) {
           <span style="opacity: 0.7"><i data-lucide="file-text" width="14" height="14"></i></span> ${dateStr}
         </div>
         <div class="vault-card-actions">
-          <button class="vault-action-btn delete-btn vault-delete-btn" data-index="${index}" title="删除"><i data-lucide="trash-2" width="14" height="14"></i> 删除</button>
-          <button class="vault-action-btn inject-btn vault-inject-btn" data-index="${index}" title="复制"><i data-lucide="copy" width="14" height="14"></i> 复制</button>
+          <button class="vault-action-btn delete-btn vault-delete-btn" data-index="${index}" title="${t('vault_delete')}"><i data-lucide="trash-2" width="14" height="14"></i> ${t('vault_delete')}</button>
+          <button class="vault-action-btn inject-btn vault-inject-btn" data-index="${index}" title="${t('vault_copy')}"><i data-lucide="copy" width="14" height="14"></i> ${t('vault_copy')}</button>
         </div>
       </div>
     `;
@@ -699,7 +702,7 @@ function renderVault(vault) {
         let currentVault = items.draftVault || [];
         currentVault.splice(idx, 1);
         chrome.storage.local.set({ draftVault: currentVault }, () => {
-          addLog('已从素材库中删除。', 'system');
+          addLog(t('log_deleted'), 'system');
           renderVault(currentVault);
         });
       });
@@ -714,9 +717,23 @@ function renderVault(vault) {
 // ==========================================
 // 5. ENGINE LOGS
 // ==========================================
+function getCurrentLang() {
+  const langInput = document.getElementById('engine-language');
+  let lang = langInput ? langInput.value : 'zh';
+  if (lang === 'auto') lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
+  return lang;
+}
+
+function t(key, fallback) {
+  const lang = getCurrentLang();
+  const dict = i18nDict[lang] || i18nDict.zh;
+  return dict[key] || fallback || key;
+}
+
 function addLog(message, type = 'system') {
   const container = document.getElementById('engine-logs');
-  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const lang = getCurrentLang();
+  const time = new Date().toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', { hour12: false });
   
   const div = document.createElement('div');
   div.className = `log-entry ${type}`;
@@ -976,7 +993,33 @@ const i18nDict = {
     theme_light: '白天模式',
     theme_dark: '黑夜模式',
     label_language: '<i data-lucide="globe" width="16" height="16" style="color: var(--text-sub);"></i> 语言',
-    placeholder_input: '输入文本/链接...'
+    placeholder_input: '输入文本/链接...',
+    placeholder_style: '粘贴一条过往的高赞推文...',
+    strategy_contrarian: '杠精流：犀利观点 / 争议',
+    strategy_expert: '专业流：专业知识 / 数据',
+    strategy_minimal: '极简流：精辟吐槽 / 玩梗',
+    vault_empty: '储备库空空如也，快去收集和洗稿吧！',
+    vault_delete: '删除',
+    vault_copy: '复制',
+    log_config_updated: '系统配置已更新。',
+    log_auto_capture: '自动捕获当前推文 (后台待命)',
+    log_account_lock: '锁定账号分析',
+    log_no_context: '无上下文可重新生成',
+    log_copy_fail: '复制失败',
+    log_enter_material: '请输入外部素材',
+    log_engine_start: '自动任务已启动，开始全天候监听。',
+    log_engine_stop: '自动任务已暂停。',
+    log_no_content: '请先捕获内容后再执行操作',
+    log_no_apikey: '缺少 API Key，任务终止',
+    log_url_detect: '[执行中] 探测到 URL，启动深度抓取任务...',
+    log_executing: '[执行中] 正在执行任务',
+    log_task_fail: '任务失败。',
+    log_task_done: '任务完成。生成长度',
+    log_sim_done: '模拟任务完成。',
+    log_auto_saved: '已自动无感存入储备库',
+    log_deleted: '已从素材库中删除。',
+    log_feedback: 'AI 进化反馈已记录，模型将在下次生成时进行纠偏。',
+    toast_saved: '✨ 已保存'
   },
   en: {
     api_warning: 'Missing Core: Please configure API Key',
@@ -1012,7 +1055,33 @@ const i18nDict = {
     theme_light: 'Light',
     theme_dark: 'Dark',
     label_language: '<i data-lucide="globe" width="16" height="16" style="color: var(--text-sub);"></i> Language',
-    placeholder_input: 'Enter text/link...'
+    placeholder_input: 'Enter text/link...',
+    placeholder_style: 'Paste a high-engagement tweet...',
+    strategy_contrarian: 'Contrarian: Sharp Takes / Debates',
+    strategy_expert: 'Expert: Professional / Data-driven',
+    strategy_minimal: 'Minimal: Witty / Meme-style',
+    vault_empty: 'Your library is empty. Start collecting and rewriting!',
+    vault_delete: 'Delete',
+    vault_copy: 'Copy',
+    log_config_updated: 'Config updated.',
+    log_auto_capture: 'Auto-captured tweet (standby)',
+    log_account_lock: 'Locked account analysis',
+    log_no_context: 'No context to regenerate',
+    log_copy_fail: 'Copy failed',
+    log_enter_material: 'Please enter content',
+    log_engine_start: 'Automation started. Listening 24/7.',
+    log_engine_stop: 'Automation paused.',
+    log_no_content: 'Capture content before proceeding',
+    log_no_apikey: 'Missing API Key',
+    log_url_detect: '[Running] URL detected, starting deep extraction...',
+    log_executing: '[Running] Executing task',
+    log_task_fail: 'Task failed.',
+    log_task_done: 'Task complete. Output length',
+    log_sim_done: 'Simulation complete.',
+    log_auto_saved: 'Auto-saved to library',
+    log_deleted: 'Removed from library.',
+    log_feedback: 'AI evolution feedback recorded.',
+    toast_saved: '✨ Saved'
   }
 };
 
@@ -1049,5 +1118,17 @@ function applyLanguage(lang) {
   });
   
   if (typeof lucide !== 'undefined') lucide.createIcons();
+  
+  // Re-render vault with translated buttons/dates
+  if (typeof chrome !== 'undefined' && chrome.storage) {
+    chrome.storage.local.get({ draftVault: [] }, (items) => {
+      renderVault(items.draftVault);
+    });
+  }
+  
+  // Update style training textarea placeholders
+  document.querySelectorAll('#style-training-list textarea').forEach(ta => {
+    ta.placeholder = dict.placeholder_style || '粘贴一条过往的高赞推文...';
+  });
 }
 
