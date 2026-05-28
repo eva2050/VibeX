@@ -35,7 +35,7 @@ console.log("X Auto Bot: Scraper loaded on X.com");
 const REPLY_COOLDOWN_MS = 300000; // 5 minutes
 const REPLY_ATTEMPT_LOCK_MS = 60000; // short lock while the automator tries to send
 const MAX_LOGS = 50;
-const MIN_REPLY_OPPORTUNITY_SCORE = 58;
+const MIN_REPLY_OPPORTUNITY_SCORE = 35; // lowered from 58 to ensure it triggers more often
 const SEARCH_DISCOVERY_MIN_INTERVAL_MS = 90 * 1000;
 const SEARCH_DISCOVERY_ROTATE_INTERVAL_MS = 2 * 60 * 1000;
 const SEARCH_DISCOVERY_LOW_QUALITY_ROTATE_MS = 15 * 1000;
