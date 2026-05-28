@@ -674,62 +674,29 @@ function addLog(level, message) {
   });
 }
 
-function debuggerCall(fn) {
-  return new Promise((resolve, reject) => {
-    fn((result) => {
-      const error = chrome.runtime.lastError;
-      if (error) {
-        reject(new Error(error.message));
-      } else {
-        resolve(result);
-      }
-    });
-  });
-}
-
 async function performTrustedClick(tabId, x, y) {
   if (!tabId) throw new Error('缺少目标标签页');
-  if (!chrome.debugger) throw new Error('缺少 debugger 权限');
 
-  const target = { tabId };
   const clickX = Math.round(Number(x));
   const clickY = Math.round(Number(y));
   if (!Number.isFinite(clickX) || !Number.isFinite(clickY)) {
     throw new Error('点击坐标无效');
   }
 
-  await debuggerCall(callback => chrome.debugger.attach(target, '1.3', callback));
-  try {
-    await debuggerCall(callback => chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: clickX,
-      y: clickY,
-      button: 'none'
-    }, callback));
-    await debuggerCall(callback => chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
-      type: 'mousePressed',
-      x: clickX,
-      y: clickY,
-      button: 'left',
-      buttons: 1,
-      clickCount: 1
-    }, callback));
-    await new Promise(resolve => setTimeout(resolve, 80));
-    await debuggerCall(callback => chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
-      type: 'mouseReleased',
-      x: clickX,
-      y: clickY,
-      button: 'left',
-      buttons: 0,
-      clickCount: 1
-    }, callback));
-  } finally {
-    try {
-      await debuggerCall(callback => chrome.debugger.detach(target, callback));
-    } catch (error) {
-      addLog('warn', `释放调试点击通道失败: ${error.message}`);
-    }
-  }
+  await chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    func: (clientX, clientY) => {
+      const el = document.elementFromPoint(clientX, clientY);
+      if (el) {
+        // Dispatch multiple events to better simulate a real click if needed, or just .click()
+        el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX, clientY }));
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX, clientY }));
+        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX, clientY }));
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX, clientY }));
+      }
+    },
+    args: [clickX, clickY]
+  });
 }
 
 chrome.runtime.onInstalled.addListener((details) => {
