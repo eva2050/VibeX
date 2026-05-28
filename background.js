@@ -903,7 +903,14 @@ let strategyPrompt = '';
               
               const pollRes = await fetch(`https://datahub.codes/api/processes/${processId}.md?key=${DATAHUB_API_KEY}`);
               if (pollRes.status === 200) {
-                 return await pollRes.text();
+                 const text = await pollRes.text();
+                 // DataHub writes progress to the markdown file incrementally. 
+                 // We must wait until it appends the final marker.
+                 if (text.includes('*此过程文件为最终版本。*') || text.includes('此过程文件为最终版本')) {
+                   return text;
+                 }
+                 // Otherwise, continue polling
+                 continue;
               } else if (pollRes.status === 404 || pollRes.status === 202 || pollRes.status === 400) {
                  continue; // 仍在处理中
               } else {
