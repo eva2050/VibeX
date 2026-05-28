@@ -891,8 +891,8 @@ let strategyPrompt = '';
             return res.json();
           })
           .then(async (data) => {
-            const processId = data.processId || data.id;
-            if (!processId) throw new Error("未获取到 DataHub processId");
+            const processId = data.processId || data.id || (data.data && data.data.processId);
+            if (!processId) throw new Error("未获取到 DataHub processId: " + JSON.stringify(data));
             
             addLog('info', `[分流路由] 任务提交成功，正在等待 DataHub 解析完成...`);
             let attempts = 0;
