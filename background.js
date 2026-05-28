@@ -939,6 +939,10 @@ let strategyPrompt = '';
              enhancedText += `\n\n[用户补充说明]: ${userSupplement}`;
           }
           
+          if (cleanText.length < 10 && !userSupplement) {
+             throw new Error("网页提取失败或内容为空");
+          }
+          
           if (!res.apiKey || res.apiKey.trim() === '') {
             addLog('success', `[提取体验模式] 提取成功 (${cleanText.length} 字符)。未配置 API，已跳过大模型。`);
             sendResponse({ success: true, result: `【纯提取体验模式】\n您尚未配置 AI API Key，无法进行大模型改写。以下是直接为您从网页中提取的纯文本内容：\n\n--------------------------\n\n${cleanText}` });
