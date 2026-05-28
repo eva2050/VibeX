@@ -868,7 +868,7 @@ let strategyPrompt = '';
       }
       
       chrome.storage.local.get(['apiKey'], (res) => {
-        const isComplexPlatform = url.match(/(feishu\.cn|mp\.weixin\.qq\.com|douyin\.com|bilibili\.com|youtube\.com|xiaohongshu\.com\/explore|tiktok\.com|kuaishou\.com)/i);
+        const isComplexPlatform = url.match(/(zhihu\.com|feishu\.cn|mp\.weixin\.qq\.com|douyin\.com|bilibili\.com|youtube\.com|xiaohongshu\.com\/explore|tiktok\.com|kuaishou\.com)/i);
         
         const DATAHUB_API_KEY = "zUBzC9YgT9f8VLrh"; 
         
