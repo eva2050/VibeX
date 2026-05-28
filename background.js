@@ -932,7 +932,8 @@ let strategyPrompt = '';
         }
         
         fetchPromise.then(text => {
-          const cleanText = (text || '').trim().substring(0, 10000);
+          // Increase substring limit since DataHub might embed large JSON structures in markdown
+          const cleanText = (text || '').trim().substring(0, 100000);
           const userSupplement = originalText.replace(url, '').trim();
           let enhancedText = `[从链接 ${url} 提取的内容]:\n${cleanText}`;
           if (userSupplement) {
