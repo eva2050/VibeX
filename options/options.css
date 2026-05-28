@@ -844,7 +844,7 @@ select.modern-input {
   border-color: rgba(0, 122, 255, 0.1);
 }
 .hover-copy-card::after {
-  content: "点击即可复制";
+  content: attr(data-copy-hint);
   position: absolute;
   bottom: 12px;
   right: 16px;

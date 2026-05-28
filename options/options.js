@@ -1012,7 +1012,8 @@ const i18nDict = {
     log_auto_saved: '已自动无感存入储备库',
     log_deleted: '已从素材库中删除。',
     log_feedback: 'AI 进化反馈已记录，模型将在下次生成时进行纠偏。',
-    toast_saved: '✨ 已保存'
+    toast_saved: '✨ 已保存',
+    hint_click_copy: '点击即可复制'
   },
   en: {
     api_warning: 'Missing Core: Please configure API Key',
@@ -1074,7 +1075,8 @@ const i18nDict = {
     log_auto_saved: 'Auto-saved to library',
     log_deleted: 'Removed from library.',
     log_feedback: 'AI evolution feedback recorded.',
-    toast_saved: '✨ Saved'
+    toast_saved: '✨ Saved',
+    hint_click_copy: 'Click to copy'
   }
 };
 
@@ -1094,6 +1096,21 @@ function applyLanguage(lang) {
     if (dict[key]) {
       el.placeholder = dict[key];
     }
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const key = el.getAttribute('data-i18n-title');
+    if (dict[key]) {
+      el.title = dict[key];
+    }
+  });
+  document.querySelectorAll('[data-i18n-attr]').forEach(el => {
+    const rules = el.getAttribute('data-i18n-attr').split(',');
+    rules.forEach(rule => {
+      const parts = rule.split(':');
+      if (parts.length === 2 && dict[parts[1]]) {
+        el.setAttribute(parts[0], dict[parts[1]]);
+      }
+    });
   });
   
   // Custom dropdown translation updates
