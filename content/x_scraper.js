@@ -35,7 +35,7 @@ console.log("X Auto Bot: Scraper loaded on X.com");
 const REPLY_COOLDOWN_MS = 300000; // 5 minutes
 const REPLY_ATTEMPT_LOCK_MS = 60000; // short lock while the automator tries to send
 const MAX_LOGS = 50;
-const MIN_REPLY_OPPORTUNITY_SCORE = 35; // lowered from 58 to ensure it triggers more often
+const MIN_REPLY_OPPORTUNITY_SCORE = 45;
 const SEARCH_DISCOVERY_MIN_INTERVAL_MS = 90 * 1000;
 const SEARCH_DISCOVERY_ROTATE_INTERVAL_MS = 2 * 60 * 1000;
 const SEARCH_DISCOVERY_LOW_QUALITY_ROTATE_MS = 15 * 1000;
@@ -905,18 +905,23 @@ function getReplyOpportunity(article, author, text, state = {}) {
   reasons.push(freshness.label);
 
   if (hasStrongEngagement(metrics, thresholds)) {
-    score += 18;
+    score += 36;
     reasons.push(`高互动(${summarizeMetrics(metrics)})`);
+    
+    // 超高互动额外加分 (热门爆款)
+    if ((metricKnown(metrics.views) && metrics.views >= thresholds.minViews * 5) || 
+        (metricKnown(metrics.likes) && metrics.likes >= thresholds.minFaves * 5)) {
+      score += 24;
+      reasons.push('极度热门爆款');
+    }
   } else if (isSearchPage() && ['views', 'likes', 'reposts', 'replies'].some(key => metricKnown(metrics[key]))) {
     score -= 24;
     reasons.push(`互动不足(${summarizeMetrics(metrics)})`);
   }
 
+  // 取消对推文长度的严格限制，因为短小精悍的爆款同样值得回复
   const visualChars = Array.from(text).length;
-  if (visualChars >= 80 && visualChars <= 520) {
-    score += 12;
-    reasons.push('信息量适中');
-  } else if (visualChars > 520) {
+  if (visualChars > 1000) {
     score -= 8;
     reasons.push('原推过长');
   }
