@@ -655,7 +655,7 @@ function renderVault(vault) {
   // Bind inject buttons
   document.querySelectorAll('.vault-inject-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
-      const idx = e.target.getAttribute('data-index');
+      const idx = btn.getAttribute('data-index');
       const textToInject = document.getElementById(`vault-text-${idx}`).value;
       
       chrome.storage.local.get({ draftVault: [] }, (items) => {
@@ -680,24 +680,20 @@ function renderVault(vault) {
         });
       }
       
-      const oldText = e.target.innerHTML;
-          e.target.innerHTML = `<i data-lucide="check" width="14" height="14"></i> 已复制`;
-          if(window.lucide) window.lucide.createIcons();
-          setTimeout(() => {
-            e.target.innerHTML = oldText;
-            if(window.lucide) window.lucide.createIcons();
-          }, 2000);
+      const oldText = btn.innerHTML;
+      btn.innerHTML = `<i data-lucide="check" width="14" height="14"></i> 已复制`;
+      if(window.lucide) window.lucide.createIcons();
+      setTimeout(() => {
+        btn.innerHTML = oldText;
+        if(window.lucide) window.lucide.createIcons();
+      }, 2000);
     });
   });
   
   // Bind delete buttons
   document.querySelectorAll('.vault-delete-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
-      let target = e.target;
-      while (!target.classList.contains('vault-delete-btn')) {
-        target = target.parentElement;
-      }
-      const idx = parseInt(target.getAttribute('data-index'), 10);
+      const idx = parseInt(btn.getAttribute('data-index'), 10);
       chrome.storage.local.get({ draftVault: [] }, (items) => {
         let currentVault = items.draftVault || [];
         currentVault.splice(idx, 1);
