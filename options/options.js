@@ -306,9 +306,6 @@ function handleNewContext(type, data) {
     addLog(t('log_auto_capture'), 'system');
   } else if (type === 'profile') {
     addLog(`${t('log_account_lock')}: ${data.author}`, 'system');
-    
-    // Auto switch to persona view
-    document.querySelector('.nav-item[data-view="view-persona"]').click();
   }
 }
 
