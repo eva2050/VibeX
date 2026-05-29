@@ -268,11 +268,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 });
 
 // Initial check for auto-scroll
-chrome.storage.local.get(['isRunning', 'profileReadRequested'], (result) => {
-  if (result.isRunning) {
-    startAutoScroll();
-    ensureBioExtracted();
-  } else if (result.profileReadRequested) {
+chrome.storage.local.get(['profileReadRequested'], (result) => {
+  // Turn off automation on page refresh by default per user request
+  chrome.storage.local.set({ isRunning: false, isAutoPaused: true });
+  
+  if (result.profileReadRequested) {
     ensureBioExtracted({ force: true });
   }
 });
@@ -3193,6 +3193,8 @@ let domUpdateTimer = null;
 let lastScrapeTime = 0;
 let lastStorageSyncTime = 0;
 
+let lastUIInjectTime = 0;
+
 const domObserver = new MutationObserver((mutations) => {
   // Check if mutations only originate from our own widget to prevent infinite loops
   let isOnlySelf = true;
@@ -3206,14 +3208,17 @@ const domObserver = new MutationObserver((mutations) => {
   }
   if (isOnlySelf) return;
 
-  if (domUpdateTimer) cancelAnimationFrame(domUpdateTimer);
-  domUpdateTimer = requestAnimationFrame(() => {
+  if (domUpdateTimer) clearTimeout(domUpdateTimer);
+  domUpdateTimer = setTimeout(() => {
     const now = Date.now();
     
-    // UI injections (high priority, bound to DOM renders)
-    ensureWidget();
-    renderWidget();
-    injectCollectButtons();
+    // UI injections (high priority, bound to DOM renders but throttled to avoid lag)
+    if (now - lastUIInjectTime > 400) {
+      ensureWidget();
+      renderWidget();
+      injectCollectButtons();
+      lastUIInjectTime = now;
+    }
     
     // Scrape logic (throttled to ~5s)
     if (now - lastScrapeTime > 5000) {
@@ -3231,7 +3236,7 @@ const domObserver = new MutationObserver((mutations) => {
       checkNewSuggestions();
       checkIdleChat();
     }
-  });
+  }, 100);
 });
 
 if (document.body) {
