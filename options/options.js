@@ -62,6 +62,33 @@ function initCore() {
   const btnAddStyle = document.getElementById('btn-add-style');
   if (btnAddStyle) btnAddStyle.addEventListener('click', () => addStyleItem());
   
+  // Reply strategy dropdown
+  const strategyContainer = document.getElementById('reply-strategy-container');
+  if (strategyContainer) {
+    strategyContainer.addEventListener('click', (e) => {
+      const trigger = e.target.closest('.custom-select-trigger');
+      if (trigger) {
+        strategyContainer.classList.toggle('open');
+      }
+      const opt = e.target.closest('.custom-select-option');
+      if (opt) {
+        const selectedValue = opt.getAttribute('data-value');
+        document.getElementById('reply-strategy').value = selectedValue;
+        saveMemory();
+        
+        // Show custom prompt editor ONLY when custom strategy is selected
+        const customPromptEditor = document.getElementById('strategy-prompt-editor');
+        if (customPromptEditor) {
+          if (selectedValue && selectedValue.includes('自定义流')) {
+            customPromptEditor.style.display = 'block';
+          } else {
+            customPromptEditor.style.display = 'none';
+          }
+        }
+      }
+    });
+  }
+  
   const btnResetPrompt = document.getElementById('btn-reset-prompt');
   if (btnResetPrompt) btnResetPrompt.addEventListener('click', resetCustomPrompt);
 
@@ -127,9 +154,7 @@ function loadMemory() {
   chrome.storage.local.get({
     apiKey: '',
     replyStrategy: '',
-    customPromptContrarian: '',
-    customPromptExpert: '',
-    customPromptMinimal: '',
+    customPromptGlobal: '',
     styleTrainingData: '',
     engineLanguage: 'en',
     uiTheme: 'auto',
@@ -167,30 +192,31 @@ function loadMemory() {
         document.querySelectorAll('#reply-strategy-container .custom-select-option').forEach(o => o.classList.remove('selected'));
         opt.classList.add('selected');
       }
+      // Show or hide prompt editor on load
+      const customPromptEditor = document.getElementById('strategy-prompt-editor');
+      if (customPromptEditor) {
+        if (items.replyStrategy && items.replyStrategy.includes('自定义流')) {
+          customPromptEditor.style.display = 'block';
+        } else {
+          customPromptEditor.style.display = 'none';
+        }
+      }
       
-      // Load custom prompts
+      // Load custom prompt
       window.customPrompts = {
-        contrarian: items.customPromptContrarian || '',
-        expert: items.customPromptExpert || '',
-        minimal: items.customPromptMinimal || ''
+        custom: items.customPromptGlobal || ''
       };
       
       const promptEditor = document.getElementById('custom-strategy-prompt');
       if (promptEditor) {
         // Sync on input
         promptEditor.addEventListener('input', (e) => {
-          const val = replyStrategy.value;
-          if (val.includes('杠精')) window.customPrompts.contrarian = e.target.value;
-          else if (val.includes('专业')) window.customPrompts.expert = e.target.value;
-          else if (val.includes('极简')) window.customPrompts.minimal = e.target.value;
+          window.customPrompts.custom = e.target.value;
         });
         promptEditor.addEventListener('blur', saveMemory);
         
         // Initial setup
-        const initVal = replyStrategy.value;
-        if (initVal.includes('杠精')) promptEditor.value = window.customPrompts.contrarian;
-        else if (initVal.includes('专业')) promptEditor.value = window.customPrompts.expert;
-        else if (initVal.includes('极简')) promptEditor.value = window.customPrompts.minimal;
+        promptEditor.value = window.customPrompts.custom;
       }
     }
     
@@ -289,9 +315,7 @@ function saveMemory() {
       uiTheme: uiTheme
     };
     if (window.customPrompts) {
-      toSave.customPromptContrarian = window.customPrompts.contrarian;
-      toSave.customPromptExpert = window.customPrompts.expert;
-      toSave.customPromptMinimal = window.customPrompts.minimal;
+      toSave.customPromptGlobal = window.customPrompts.custom;
     }
     
     chrome.storage.local.set(toSave, () => {

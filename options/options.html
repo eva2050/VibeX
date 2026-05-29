@@ -86,7 +86,7 @@
           <input type="password" id="api-key-input" placeholder="sk-..." class="modern-input" style="margin-bottom: 16px;">
           
           <label><i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_strategy">默认回复策略</span></label>
-          <div class="custom-select-container" id="reply-strategy-container" style="margin-bottom: 16px;">
+          <div class="custom-select-container" id="reply-strategy-container" style="margin-bottom: 12px;">
             <input type="hidden" id="reply-strategy" value="专业流：专业知识 / 数据">
             <div class="custom-select-trigger" id="reply-strategy-trigger">
               <span>专业流：专业知识 / 数据</span>
@@ -96,20 +96,19 @@
               <div class="custom-select-option" data-value="杠精流：犀利观点 / 争议" data-i18n="strategy_contrarian">杠精流：犀利观点 / 争议</div>
               <div class="custom-select-option selected" data-value="专业流：专业知识 / 数据" data-i18n="strategy_expert">专业流：专业知识 / 数据</div>
               <div class="custom-select-option" data-value="极简流：精辟吐槽 / 玩梗" data-i18n="strategy_minimal">极简流：精辟吐槽 / 玩梗</div>
+              <div class="custom-select-option" data-value="自定义流：完全自定义" data-i18n="strategy_custom">自定义流：完全自定义</div>
             </div>
           </div>
           
-
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <label style="margin-bottom: 0;"><i data-lucide="edit-3" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_custom_prompt">自定义 Prompt 设定</span></label>
-            <button id="btn-reset-prompt" style="background: none; border: none; color: var(--text-sub); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px;" title="Reset to Default">
-              <i data-lucide="rotate-ccw" width="12" height="12"></i> <span data-i18n="btn_reset_prompt">Reset</span>
-            </button>
+          <div id="strategy-prompt-editor" style="margin-bottom: 16px; display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label style="margin-bottom: 0; font-size: 12px; color: var(--text-sub);"><i data-lucide="edit-3" width="14" height="14"></i> 自定义 Prompt</label>
+              <button id="btn-reset-prompt" style="background: none; border: none; color: var(--text-sub); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px;" title="Reset to Default">
+                <i data-lucide="rotate-ccw" width="12" height="12"></i> <span data-i18n="btn_reset_prompt">Reset</span>
+              </button>
+            </div>
+            <textarea id="custom-strategy-prompt" class="modern-input" style="min-height: 100px; resize: vertical; padding: 12px; font-size: 13px; font-family: monospace;" data-i18n-placeholder="placeholder_custom_prompt" placeholder="在这里写入你完全自定义的 System Prompt..."></textarea>
           </div>
-          <div id="strategy-prompt-editor" style="margin-bottom: 16px;">
-            <textarea id="custom-strategy-prompt" class="modern-input" style="min-height: 100px; resize: vertical; padding: 12px; font-size: 13px; font-family: monospace;" data-i18n-placeholder="placeholder_custom_prompt" placeholder="可以在这里完全重写当前回复流派的底层 Prompt..."></textarea>
-          </div>
-          
           
           <label style="margin-top: 12px;"><i data-lucide="moon" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_theme">界面主题</span></label>
           <div class="custom-select-container" id="ui-theme-container" style="margin-bottom: 16px;">

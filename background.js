@@ -762,17 +762,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "magicPrompt" || request.action === "extractAndRewrite") {
     
     const executeMagicPromptCore = (req, textToProcess, senderTab) => {
-      chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptContrarian', 'customPromptExpert', 'customPromptMinimal'], (config) => {
+      chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal'], (config) => {
         let promptPrefix = '';
         const currentReplyStrategy = config.replyStrategy || '专业流：专业知识 / 数据';
         
 let strategyPrompt = '';
         if (currentReplyStrategy.includes('杠精')) {
-          strategyPrompt = config.customPromptContrarian || '你是一个极其犀利、专挑漏洞的“抬杠带师”和反直觉思考者。任务：回复这条推文。策略：1. 找出原推文逻辑最薄弱的一点进行精准打击；2. 抛出一个极其反直觉的犀利观点；3. 多用反问句引发争议和辩论。要求：一针见血，带点嘲讽感但不做人身攻击，字数控制在40字以内。';
+          strategyPrompt = '你是一个极其犀利、专挑漏洞的“抬杠带师”和反直觉思考者。任务：回复这条推文。策略：1. 找出原推文逻辑最薄弱的一点进行精准打击；2. 抛出一个极其反直觉的犀利观点；3. 多用反问句引发争议和辩论。要求：一针见血，带点嘲讽感但不做人身攻击，字数控制在40字以内。';
         } else if (currentReplyStrategy.includes('专业')) {
-          strategyPrompt = config.customPromptExpert || '你是一个在行业内深耕多年、极具洞察力的行业老兵。任务：客观且专业地回复这条推文。策略：1. 直接基于推文内容进行客观的专业分析，无论赞同还是反对都必须一针见血；2. 【关键】必须要补充一条极其硬核的冷知识、底层逻辑或具体数据来作为支撑。要求：不卑不亢，展现极高的专业素养和信息密度，字数控制在80字以内。';
+          strategyPrompt = '你是一个在行业内深耕多年、极具洞察力的行业老兵。任务：客观且专业地回复这条推文。策略：1. 直接基于推文内容进行客观的专业分析，无论赞同还是反对都必须一针见血；2. 【关键】必须要补充一条极其硬核的冷知识、底层逻辑或具体数据来作为支撑。要求：不卑不亢，展现极高的专业素养和信息密度，字数控制在80字以内。';
         } else if (currentReplyStrategy.includes('极简')) {
-          strategyPrompt = config.customPromptMinimal || '你是一个极度厌恶长篇大论、浑身都是梗的网络乐子人。任务：回复这条推文。策略：1. 用一句极其精辟的吐槽、神级比喻或者互联网黑话来总结原推文；2. 绝不要分析，只要情绪价值和幽默感。要求：短平快，字数绝对不能超过15个字。';
+          strategyPrompt = '你是一个极度厌恶长篇大论、浑身都是梗的网络乐子人。任务：回复这条推文。策略：1. 用一句极其精辟的吐槽、神级比喻或者互联网黑话来总结原推文；2. 绝不要分析，只要情绪价值和幽默感。要求：短平快，字数绝对不能超过15个字。';
+        } else if (currentReplyStrategy.includes('自定义')) {
+          strategyPrompt = config.customPromptGlobal || '你是一位专业的AI助手，请按照你的判断提供高质量回复。';
         } else {
           strategyPrompt = '你是一位混迹推特多年的资深真实网友。任务：请使用“' + currentReplyStrategy + '”的策略，为这条推文写一条高质量的破冰回复。要求：口语化，不要有AI味。';
         }
