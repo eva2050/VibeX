@@ -90,6 +90,10 @@ function initNavigation() {
       const targetView = document.getElementById(item.dataset.view);
       targetView.classList.remove('hidden');
       targetView.classList.add('is-active');
+      
+      // Update preflight status to check if banner should be hidden
+      const currentApiKey = document.getElementById('api-key-input')?.value || '';
+      updatePreflightStatus(currentApiKey);
     });
   });
 }
@@ -101,9 +105,16 @@ function updatePreflightStatus(apiKey) {
   const banner = document.getElementById('api-warning-banner');
   const actionButtons = document.querySelectorAll('.magic-btn.primary, #btn-manual-rewrite');
   
+  const activeTab = document.querySelector('.nav-item.active');
+  const isSettingsTab = activeTab && activeTab.dataset.view === 'view-persona';
+  
   if (!apiKey || apiKey.trim() === '') {
     if (banner) {
-      banner.classList.remove('hidden');
+      if (isSettingsTab) {
+        banner.classList.add('hidden');
+      } else {
+        banner.classList.remove('hidden');
+      }
       banner.onclick = () => document.querySelector('.nav-item[data-view="view-persona"]').click();
     }
     actionButtons.forEach(btn => {
