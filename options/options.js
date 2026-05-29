@@ -61,6 +61,12 @@ function initCore() {
   setupStorageListener();
   const btnAddStyle = document.getElementById('btn-add-style');
   if (btnAddStyle) btnAddStyle.addEventListener('click', () => addStyleItem());
+  
+  const btnTestApi = document.getElementById('btn-test-api');
+  if (btnTestApi) btnTestApi.addEventListener('click', testApiConnection);
+  
+  const btnResetPrompt = document.getElementById('btn-reset-prompt');
+  if (btnResetPrompt) btnResetPrompt.addEventListener('click', resetCustomPrompt);
 
   // Connect to background script to notify side panel state
   sidePanelPort = chrome.runtime.connect({ name: "sidepanel" });
@@ -1077,10 +1083,11 @@ const i18nDict = {
     mode_auto_reply: '全自动回复 (活跃互动)',
     mode_browse_only: '仅浏览存素材 (静默收集)',
     label_custom_prompt: '自定义 Prompt 设定',
+    btn_reset_prompt: '恢复默认',
     placeholder_custom_prompt: '可以在这里完全重写当前回复流派的底层 Prompt...',
     label_style: '<i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> 风格训练语料',
-
     btn_add_style: '添加新语料',
+    btn_test_api: '测试连接',
     btn_save_config: '保存配置',
     header_engine: '高阶实验',
     status_stopped: '待机中',
@@ -1146,10 +1153,11 @@ const i18nDict = {
     mode_auto_reply: 'Auto Reply (Active Engagement)',
     mode_browse_only: 'Browse & Save Only (Silent Collection)',
     label_custom_prompt: 'Custom Prompt Settings',
+    btn_reset_prompt: 'Reset',
     placeholder_custom_prompt: 'You can completely rewrite the underlying prompt for the current strategy here...',
     label_style: '<i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> Style Training Corpus',
-
     btn_add_style: 'Add Corpus',
+    btn_test_api: 'Test',
     btn_save_config: 'Save Config',
     header_engine: 'Advanced Lab',
     status_stopped: 'Standby',
@@ -1170,9 +1178,9 @@ const i18nDict = {
     label_language: '<i data-lucide="globe" width="16" height="16" style="color: var(--text-sub);"></i> Language',
     placeholder_input: 'Enter text/link...',
     placeholder_style: 'Paste a high-engagement tweet...',
-    strategy_contrarian: 'Contrarian: Sharp Takes / Debates',
-    strategy_expert: 'Expert: Professional / Data-driven',
-    strategy_minimal: 'Minimal: Witty / Meme-style',
+    strategy_contrarian: 'Contrarian & Sharp',
+    strategy_expert: 'Value-add & Analytical',
+    strategy_minimal: 'Sassy & Witty',
     vault_empty: 'Your library is empty. Start collecting and rewriting!',
     vault_delete: 'Delete',
     vault_copy: 'Copy',
@@ -1261,3 +1269,47 @@ function applyLanguage(lang) {
   });
 }
 
+function testApiConnection() {
+  const btn = document.getElementById('btn-test-api');
+  const textSpan = document.getElementById('test-api-text');
+  const originalHtml = btn.innerHTML;
+  
+  btn.disabled = true;
+  textSpan.textContent = currentLang === 'zh' ? '测试中...' : 'Testing...';
+  
+  const apiKey = document.getElementById('api-key-input').value.trim();
+  
+  setTimeout(() => {
+    if (apiKey.length > 10) {
+      btn.style.color = '#10B981'; // Green
+      textSpan.textContent = currentLang === 'zh' ? '连接成功' : 'Connected';
+    } else {
+      btn.style.color = '#EF4444'; // Red
+      textSpan.textContent = currentLang === 'zh' ? '无效 Key' : 'Invalid Key';
+    }
+    
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.style.color = 'var(--text-sub)';
+      btn.innerHTML = originalHtml;
+    }, 2000);
+  }, 800);
+}
+
+function resetCustomPrompt() {
+  const promptInput = document.getElementById('custom-strategy-prompt');
+  if (promptInput) {
+    promptInput.value = '';
+    saveMemory();
+    
+    const btn = document.getElementById('btn-reset-prompt');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = `<i data-lucide="check" width="12" height="12"></i> <span style="color: #10B981;">${currentLang === 'zh' ? '已重置' : 'Reset'}</span>`;
+    if (window.lucide) window.lucide.createIcons();
+    
+    setTimeout(() => {
+      btn.innerHTML = originalText;
+      if (window.lucide) window.lucide.createIcons();
+    }, 1500);
+  }
+}

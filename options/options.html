@@ -76,7 +76,12 @@
         </div>
 
         <div class="glass-form" style="margin-top: 16px;">
-          <label data-i18n="label_apikey"><i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> 模型 API Key (必填)</label>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label data-i18n="label_apikey" style="margin-bottom: 0;"><i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> 模型 API Key (必填)</label>
+            <button id="btn-test-api" style="background: none; border: none; color: var(--text-sub); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px;" title="Test Connection">
+              <i data-lucide="zap" width="12" height="12"></i> <span data-i18n="btn_test_api" id="test-api-text">Test Connection</span>
+            </button>
+          </div>
           <input type="password" id="api-key-input" placeholder="sk-..." class="modern-input" style="margin-bottom: 16px;">
           
           <label data-i18n="label_strategy"><i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> 默认回复策略</label>
@@ -107,7 +112,12 @@
             </div>
           </div>
           
-          <label><i data-lucide="edit-3" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_custom_prompt">自定义 Prompt 设定</span></label>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label style="margin-bottom: 0;"><i data-lucide="edit-3" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_custom_prompt">自定义 Prompt 设定</span></label>
+            <button id="btn-reset-prompt" style="background: none; border: none; color: var(--text-sub); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px;" title="Reset to Default">
+              <i data-lucide="rotate-ccw" width="12" height="12"></i> <span data-i18n="btn_reset_prompt">Reset</span>
+            </button>
+          </div>
           <div id="strategy-prompt-editor" style="margin-bottom: 16px;">
             <textarea id="custom-strategy-prompt" class="modern-input" style="min-height: 100px; resize: vertical; padding: 12px; font-size: 13px; font-family: monospace;" data-i18n-placeholder="placeholder_custom_prompt" placeholder="可以在这里完全重写当前回复流派的底层 Prompt..."></textarea>
           </div>
