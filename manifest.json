@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "VibeX: AI Copilot for X Growth",
   "version": "1.0",
-  "description": "Context-Aware AI Core for X (Twitter)",
+  "description": "Your AI-powered X (Twitter) growth copilot — auto-generate viral replies, rewrite content in your unique style, and build your personal brand with smart context-aware automation.",
   "icons": {
     "16": "assets/icons/icon-16.png",
     "32": "assets/icons/icon-32.png",
