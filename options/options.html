@@ -98,20 +98,7 @@
             </div>
           </div>
           
-          <label data-i18n="label_automation_mode"><i data-lucide="zap" width="16" height="16" style="color: var(--text-sub);"></i> 自动化运行模式</label>
-          <div class="custom-select-container" id="automation-mode-container" style="margin-bottom: 16px;">
-            <input type="hidden" id="automation-mode" value="autoReply">
-            <div class="custom-select-trigger" id="automation-mode-trigger">
-              <span data-i18n="mode_auto_reply">全自动回复 (活跃互动)</span>
-              <i data-lucide="chevron-down" width="16" height="16" style="color: var(--text-sub);"></i>
-            </div>
-            <div class="custom-select-dropdown">
-              <div class="custom-select-option" data-value="autoPost" data-i18n="mode_auto_post">全自动发帖 (原创输出)</div>
-              <div class="custom-select-option selected" data-value="autoReply" data-i18n="mode_auto_reply">全自动回复 (活跃互动)</div>
-              <div class="custom-select-option" data-value="browseOnly" data-i18n="mode_browse_only">仅浏览存素材 (静默收集)</div>
-            </div>
-          </div>
-          
+
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
             <label style="margin-bottom: 0;"><i data-lucide="edit-3" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_custom_prompt">自定义 Prompt 设定</span></label>
             <button id="btn-reset-prompt" style="background: none; border: none; color: var(--text-sub); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px;" title="Reset to Default">
@@ -178,6 +165,21 @@
           <p style="font-size: 13px; color: #86868b; margin-top: 16px; line-height: 1.5; background: #F9F9FA; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
             <span data-i18n="desc_engine">开启后，代理将在后台模拟人类交互模式（滚动、延迟、随机点击）自动运行，以避免触发风控限制。</span>
           </p>
+          <div style="margin-top: 16px; background: var(--bg-color); border-radius: var(--radius-sm);">
+            <label data-i18n="label_automation_mode" style="margin-bottom: 8px;"><i data-lucide="zap" width="16" height="16" style="color: var(--text-sub);"></i> 自动化运行模式</label>
+            <div class="custom-select-container" id="automation-mode-container" style="margin-bottom: 0;">
+              <input type="hidden" id="automation-mode" value="autoReply">
+              <div class="custom-select-trigger" id="automation-mode-trigger" style="background: var(--bg-body);">
+                <span data-i18n="mode_auto_reply">全自动回复 (活跃互动)</span>
+                <i data-lucide="chevron-down" width="16" height="16" style="color: var(--text-sub);"></i>
+              </div>
+              <div class="custom-select-dropdown">
+                <div class="custom-select-option" data-value="autoPost" data-i18n="mode_auto_post">全自动发帖 (原创输出)</div>
+                <div class="custom-select-option selected" data-value="autoReply" data-i18n="mode_auto_reply">全自动回复 (活跃互动)</div>
+                <div class="custom-select-option" data-value="browseOnly" data-i18n="mode_browse_only">仅浏览存素材 (静默收集)</div>
+              </div>
+            </div>
+          </div>
         </div>
         
         <div class="dashboard-stats">
