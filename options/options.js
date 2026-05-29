@@ -62,9 +62,6 @@ function initCore() {
   const btnAddStyle = document.getElementById('btn-add-style');
   if (btnAddStyle) btnAddStyle.addEventListener('click', () => addStyleItem());
   
-  const btnTestApi = document.getElementById('btn-test-api');
-  if (btnTestApi) btnTestApi.addEventListener('click', testApiConnection);
-  
   const btnResetPrompt = document.getElementById('btn-reset-prompt');
   if (btnResetPrompt) btnResetPrompt.addEventListener('click', resetCustomPrompt);
 
@@ -142,6 +139,7 @@ function loadMemory() {
     const apiKeyInput = document.getElementById('api-key-input');
     if (apiKeyInput) {
       apiKeyInput.value = items.apiKey || '';
+      updateApiStatusIndicator();
     }
 
     const automationModeInput = document.getElementById('automation-mode');
@@ -410,6 +408,7 @@ function handleNewContext(type, data) {
 // ==========================================
 function bindActions() {
   document.getElementById('api-key-input').addEventListener('blur', saveMemory);
+  document.getElementById('api-key-input').addEventListener('input', updateApiStatusIndicator);
   
   // Auto-save listeners
   const apiInput = document.getElementById('api-key-input');
@@ -1274,40 +1273,24 @@ function applyLanguage(lang) {
   });
 }
 
-function testApiConnection(e) {
-  if (e) e.preventDefault();
-  console.log('[VibeX] Testing API connection...');
-  
-  const btn = document.getElementById('btn-test-api');
-  const textSpan = document.getElementById('test-api-text');
-  
-  if (!btn || !textSpan) {
-    console.error('[VibeX] Test API button elements not found.');
-    return;
-  }
-  
-  const originalHtml = btn.innerHTML;
-  btn.disabled = true;
-  textSpan.textContent = currentLang === 'zh' ? '测试中...' : 'Testing...';
+function updateApiStatusIndicator() {
+  const dot = document.getElementById('api-status-dot');
+  const textSpan = document.getElementById('api-status-text');
+  if (!dot || !textSpan) return;
   
   const apiKey = document.getElementById('api-key-input').value.trim();
   
-  setTimeout(() => {
-    if (apiKey.length > 10) {
-      btn.style.color = '#10B981'; // Green
-      textSpan.textContent = currentLang === 'zh' ? '连接成功' : 'Connected';
-    } else {
-      btn.style.color = '#EF4444'; // Red
-      textSpan.textContent = currentLang === 'zh' ? '无效 Key' : 'Invalid Key';
-    }
-    
-    setTimeout(() => {
-      btn.disabled = false;
-      btn.style.color = 'var(--text-sub)';
-      btn.innerHTML = originalHtml;
-      if (window.lucide) window.lucide.createIcons();
-    }, 2000);
-  }, 800);
+  if (apiKey.length > 10) {
+    dot.style.background = '#10B981'; // Green
+    dot.classList.add('pulse');
+    textSpan.textContent = currentLang === 'zh' ? '已连接' : 'Connected';
+    textSpan.style.color = '#10B981';
+  } else {
+    dot.style.background = '#EF4444'; // Red
+    dot.classList.remove('pulse');
+    textSpan.textContent = currentLang === 'zh' ? '未连接' : 'Not Connected';
+    textSpan.style.color = 'var(--text-sub)';
+  }
 }
 
 function resetCustomPrompt() {
