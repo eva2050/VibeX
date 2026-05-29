@@ -138,7 +138,12 @@ function loadMemory() {
   }, (items) => {
     const apiKeyInput = document.getElementById('api-key-input');
     if (apiKeyInput) {
-      apiKeyInput.value = items.apiKey || '';
+      // If browser autofilled it before we loaded, save it
+      if (!items.apiKey && apiKeyInput.value.length > 0) {
+        saveMemory();
+      } else {
+        apiKeyInput.value = items.apiKey || '';
+      }
       updateApiStatusIndicator();
     }
 
