@@ -82,10 +82,27 @@
               <div class="context-indicator" id="api-status-dot" style="margin-right: 0; background: #EF4444;"></div>
               <span id="api-status-text">未连接</span>
             </div>
-          </div>
           <input type="password" id="api-key-input" placeholder="sk-..." class="modern-input">
           
-          <label><i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_strategy">默认回复策略</span></label>
+          <label style="margin-top: 16px;"><i data-lucide="cpu" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_api_provider">AI 服务商</span></label>
+          <div class="custom-select-container" id="api-provider-container">
+            <input type="hidden" id="api-provider" value="gemini">
+            <div class="custom-select-trigger" id="api-provider-trigger">
+              <span>Google Gemini</span>
+              <i data-lucide="chevron-down" width="16" height="16" style="color: var(--text-sub);"></i>
+            </div>
+            <div class="custom-select-dropdown">
+              <div class="custom-select-option selected" data-value="gemini">Google Gemini</div>
+              <div class="custom-select-option" data-value="deepseek">DeepSeek</div>
+              <div class="custom-select-option" data-value="openrouter">OpenRouter</div>
+              <div class="custom-select-option" data-value="qwen">Qwen (通义千问)</div>
+            </div>
+          </div>
+          
+          <label style="margin-top: 16px;"><i data-lucide="box" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_ai_model">模型名称</span></label>
+          <input type="text" id="ai-model-input" placeholder="gemini-2.5-flash" class="modern-input" value="gemini-2.5-flash">
+          
+          <label style="margin-top: 16px;"><i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_strategy">默认回复策略</span></label>
           <div class="custom-select-container" id="reply-strategy-container">
             <input type="hidden" id="reply-strategy" value="极简流：精辟吐槽 / 玩梗">
             <div class="custom-select-trigger" id="reply-strategy-trigger">

@@ -137,6 +137,8 @@ function loadMemory() {
 
   chrome.storage.local.get({
     apiKey: '',
+    apiProvider: 'gemini',
+    aiModel: 'gemini-2.5-flash',
     replyStrategy: '',
     customPromptGlobal: '',
     styleTrainingData: '',
@@ -154,6 +156,22 @@ function loadMemory() {
         apiKeyInput.value = items.apiKey || '';
       }
       updateApiStatusIndicator();
+    }
+    
+    const apiProvider = document.getElementById('api-provider');
+    if (apiProvider) {
+      apiProvider.value = items.apiProvider || 'gemini';
+      const opt = document.querySelector(`#api-provider-container .custom-select-option[data-value="${apiProvider.value}"]`);
+      if (opt) {
+        document.querySelector('#api-provider-trigger span').textContent = opt.textContent;
+        document.querySelectorAll('#api-provider-container .custom-select-option').forEach(o => o.classList.remove('selected'));
+        opt.classList.add('selected');
+      }
+    }
+    
+    const aiModelInput = document.getElementById('ai-model-input');
+    if (aiModelInput) {
+      aiModelInput.value = items.aiModel || 'gemini-2.5-flash';
     }
 
     const automationModeInput = document.getElementById('automation-mode');
@@ -281,30 +299,25 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 });
 
 function saveMemory() {
-  const apiKey = document.getElementById('api-key-input').value.trim();
-  const target = document.getElementById('reply-strategy').value.trim();
-  const styleTrainingData = Array.from(document.querySelectorAll('#style-training-list textarea')).map(t => t.value.trim()).filter(t => t !== '');
-  const langInput = document.getElementById('engine-language');
-  const engineLanguage = langInput ? langInput.value : 'en';
-  
-  const themeInput = document.getElementById('ui-theme');
-  const uiTheme = themeInput ? themeInput.value : 'auto';
+  const toSave = {
+    apiKey: document.getElementById('api-key-input').value.trim(),
+    apiProvider: document.getElementById('api-provider')?.value || 'gemini',
+    aiModel: document.getElementById('ai-model-input')?.value.trim() || 'gemini-2.5-flash',
+    replyStrategy: document.getElementById('reply-strategy')?.value || '专业流：专业知识 / 数据',
+    customPromptGlobal: document.getElementById('custom-strategy-prompt')?.value || '',
+    styleTrainingData: Array.from(document.querySelectorAll('#style-training-list textarea')).map(t => t.value.trim()).filter(t => t !== ''),
+    engineLanguage: document.getElementById('engine-language')?.value || 'en',
+    uiTheme: document.getElementById('ui-theme')?.value || 'auto'
+  };
+
+  if (window.customPrompts) {
+    toSave.customPromptGlobal = window.customPrompts.custom;
+  }
 
   if (chrome.storage) {
-    let toSave = {
-      apiKey: apiKey,
-      replyStrategy: target,
-      styleTrainingData: styleTrainingData,
-      engineLanguage: engineLanguage,
-      uiTheme: uiTheme
-    };
-    if (window.customPrompts) {
-      toSave.customPromptGlobal = window.customPrompts.custom;
-    }
-    
     chrome.storage.local.set(toSave, () => {
-      applyTheme(uiTheme);
-      applyLanguage(engineLanguage);
+      applyTheme(toSave.uiTheme);
+      applyLanguage(toSave.engineLanguage);
       
       const automationModeInput = document.getElementById('automation-mode');
       if (automationModeInput) {
@@ -313,7 +326,7 @@ function saveMemory() {
           str.automationMode = automationModeInput.value;
           chrome.storage.local.set({ onboardingStrategy: str }, () => {
             addLog(t('log_config_updated'), 'system');
-            updatePreflightStatus(apiKey);
+            updatePreflightStatus(toSave.apiKey);
           });
         });
       } else {
@@ -421,6 +434,32 @@ function handleNewContext(type, data) {
 // ==========================================
 function bindActions() {
   document.getElementById('api-key-input').addEventListener('blur', saveMemory);
+  
+  // Update AI Model default on Provider change
+  document.getElementById('api-provider-container')?.addEventListener('click', (e) => {
+    // Wait for the next tick for the hidden input to update its value via custom select logic
+    setTimeout(() => {
+      const provider = document.getElementById('api-provider').value;
+      const modelInput = document.getElementById('ai-model-input');
+      if (modelInput) {
+        const defaults = {
+          gemini: 'gemini-2.5-flash',
+          deepseek: 'deepseek-chat',
+          openrouter: 'google/gemini-2.5-flash',
+          qwen: 'qwen-plus'
+        };
+        // Only auto-replace if they haven't explicitly saved a different value yet, or just force the default to be helpful
+        modelInput.value = defaults[provider] || defaults.gemini;
+        saveMemory(); // Save immediately
+        updateApiStatusIndicator(); // Retest connection
+      }
+    }, 10);
+  });
+  
+  document.getElementById('ai-model-input')?.addEventListener('blur', () => {
+    saveMemory();
+    updateApiStatusIndicator();
+  });
   document.getElementById('api-key-input').addEventListener('input', updateApiStatusIndicator);
   
   // Auto-save listeners
@@ -1212,6 +1251,8 @@ const i18nDict = {
     theme_light: 'Light',
     theme_dark: 'Dark',
     label_language: 'Language',
+    label_api_provider: 'AI Provider',
+    label_ai_model: 'Model Name',
     placeholder_input: 'Enter text/link...',
     placeholder_style: 'Paste a high-engagement tweet...',
     vault_empty_title: 'Your library is empty',
