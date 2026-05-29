@@ -1278,6 +1278,7 @@ function applyLanguage(lang) {
   });
 }
 
+let apiVerificationTimer = null;
 function updateApiStatusIndicator() {
   const dot = document.getElementById('api-status-dot');
   const textSpan = document.getElementById('api-status-text');
@@ -1286,11 +1287,35 @@ function updateApiStatusIndicator() {
   const apiKey = document.getElementById('api-key-input').value.trim();
   const lang = document.getElementById('engine-language')?.value || 'en';
   
+  // Clear any pending verification
+  if (apiVerificationTimer) clearTimeout(apiVerificationTimer);
+  
   if (apiKey.length > 10) {
-    dot.style.background = '#10B981'; // Green
+    // Show Verifying state
+    dot.style.background = '#F59E0B'; // Yellow
     dot.classList.add('pulse');
-    textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '已连接' : 'Connected';
-    textSpan.style.color = '#10B981';
+    textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '正在验证...' : 'Verifying...';
+    textSpan.style.color = '#F59E0B';
+    
+    // Ping background script after 800ms debounce
+    apiVerificationTimer = setTimeout(() => {
+      if (chrome && chrome.runtime) {
+        chrome.runtime.sendMessage({ action: "testApiConnection", apiKey: apiKey }, (response) => {
+          if (response && response.success) {
+            dot.style.background = '#10B981'; // Green
+            dot.classList.add('pulse');
+            textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '已连接' : 'Connected';
+            textSpan.style.color = '#10B981';
+          } else {
+            dot.style.background = '#EF4444'; // Red
+            dot.classList.remove('pulse');
+            textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '验证失败' : 'Invalid Key';
+            textSpan.style.color = '#EF4444';
+            console.error("API Verification failed:", response?.error);
+          }
+        });
+      }
+    }, 800);
   } else {
     dot.style.background = '#EF4444'; // Red
     dot.classList.remove('pulse');

@@ -734,7 +734,14 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // 处理来自 content scripts 或 popup 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "generateReply") {
+  if (request.action === "testApiConnection") {
+    // Ping Gemini or OpenAI with a minimal request to verify the key
+    const pingPrompt = "ping";
+    callLLM(pingPrompt, { apiKey: request.apiKey, apiProvider: request.apiProvider || 'gemini', aiModel: request.aiModel || 'gemini-1.5-flash' }, false)
+      .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  } else if (request.action === "generateReply") {
     addLog('info', '收到回复生成请求，调用 AI 接口...');
     // 调用大模型 API 生成回复
     generateAIResponse(request.tweetContent || request.tweetText || '', request)
