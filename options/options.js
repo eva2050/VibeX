@@ -434,33 +434,6 @@ function handleNewContext(type, data) {
 // ==========================================
 function bindActions() {
   document.getElementById('api-key-input').addEventListener('blur', saveMemory);
-  
-  // Update AI Model default on Provider change
-  document.getElementById('api-provider-container')?.addEventListener('click', (e) => {
-    // Wait for the next tick for the hidden input to update its value via custom select logic
-    setTimeout(() => {
-      const provider = document.getElementById('api-provider').value;
-      const modelInput = document.getElementById('ai-model-input');
-      if (modelInput) {
-        const defaults = {
-          gemini: 'gemini-2.5-flash',
-          deepseek: 'deepseek-chat',
-          openai: 'gpt-4o-mini',
-          openrouter: 'google/gemini-2.5-flash',
-          qwen: 'qwen-plus'
-        };
-        // Only auto-replace if they haven't explicitly saved a different value yet, or just force the default to be helpful
-        modelInput.value = defaults[provider] || defaults.gemini;
-        saveMemory(); // Save immediately
-        updateApiStatusIndicator(); // Retest connection
-      }
-    }, 10);
-  });
-  
-  document.getElementById('ai-model-input')?.addEventListener('blur', () => {
-    saveMemory();
-    updateApiStatusIndicator();
-  });
   document.getElementById('api-key-input').addEventListener('input', (e) => {
     // Auto-detect provider based on key format
     const key = e.target.value.trim();
