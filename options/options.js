@@ -130,11 +130,23 @@ function loadMemory() {
     styleTrainingData: '',
     engineLanguage: 'en',
     uiTheme: 'auto',
-    draftVault: []
+    draftVault: [],
+    onboardingStrategy: {}
   }, (items) => {
     const apiKeyInput = document.getElementById('api-key-input');
     if (apiKeyInput) {
       apiKeyInput.value = items.apiKey || '';
+    }
+
+    const automationModeInput = document.getElementById('automation-mode');
+    if (automationModeInput) {
+      automationModeInput.value = items.onboardingStrategy?.automationMode || 'review';
+      const opt = document.querySelector(`#automation-mode-container .custom-select-option[data-value="${automationModeInput.value}"]`);
+      if (opt) {
+        document.querySelector('#automation-mode-trigger span').textContent = opt.textContent;
+        document.querySelectorAll('#automation-mode-container .custom-select-option').forEach(o => o.classList.remove('selected'));
+        opt.classList.add('selected');
+      }
     }
     
     const replyStrategy = document.getElementById('reply-strategy');
@@ -276,8 +288,21 @@ function saveMemory() {
     chrome.storage.local.set(toSave, () => {
       applyTheme(uiTheme);
       applyLanguage(engineLanguage);
-      addLog(t('log_config_updated'), 'system');
-      updatePreflightStatus(apiKey);
+      
+      const automationModeInput = document.getElementById('automation-mode');
+      if (automationModeInput) {
+        chrome.storage.local.get(['onboardingStrategy'], (res) => {
+          let str = res.onboardingStrategy || {};
+          str.automationMode = automationModeInput.value;
+          chrome.storage.local.set({ onboardingStrategy: str }, () => {
+            addLog(t('log_config_updated'), 'system');
+            updatePreflightStatus(apiKey);
+          });
+        });
+      } else {
+        addLog(t('log_config_updated'), 'system');
+        updatePreflightStatus(apiKey);
+      }
       
       // Toast notification instead of button
       let existingToast = document.getElementById('save-toast');
@@ -1042,6 +1067,10 @@ const i18nDict = {
     desc_settings: '系统配置与模型参数。',
     label_apikey: '<i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> 模型 API Key (必填)',
     label_strategy: '<i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> 默认回复策略',
+    label_automation_mode: '<i data-lucide="zap" width="16" height="16" style="color: var(--text-sub);"></i> 自动化运行模式',
+    mode_review: '先审后发 (安全)',
+    mode_auto: '全自动发帖 (激进)',
+    mode_shadow: '影子回复 (仅记录)',
     label_custom_prompt: '自定义 Prompt 设定',
     placeholder_custom_prompt: '可以在这里完全重写当前回复流派的底层 Prompt...',
     label_style: '<i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> 风格训练语料',
@@ -1107,6 +1136,10 @@ const i18nDict = {
     desc_settings: 'System configuration and model parameters.',
     label_apikey: '<i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> Model API Key (Required)',
     label_strategy: '<i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> Default Reply Strategy',
+    label_automation_mode: '<i data-lucide="zap" width="16" height="16" style="color: var(--text-sub);"></i> Automation Mode',
+    mode_review: 'Review Before Publish (Safe)',
+    mode_auto: 'Auto Publish (Aggressive)',
+    mode_shadow: 'Shadow Reply (Log Only)',
     label_custom_prompt: 'Custom Prompt Settings',
     placeholder_custom_prompt: 'You can completely rewrite the underlying prompt for the current strategy here...',
     label_style: '<i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> Style Training Corpus',

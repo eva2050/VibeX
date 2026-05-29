@@ -93,6 +93,20 @@
             </div>
           </div>
           
+          <label data-i18n="label_automation_mode"><i data-lucide="zap" width="16" height="16" style="color: var(--text-sub);"></i> 自动化运行模式</label>
+          <div class="custom-select-container" id="automation-mode-container" style="margin-bottom: 16px;">
+            <input type="hidden" id="automation-mode" value="review">
+            <div class="custom-select-trigger" id="automation-mode-trigger">
+              <span data-i18n="mode_review">先审后发 (安全)</span>
+              <i data-lucide="chevron-down" width="16" height="16" style="color: var(--text-sub);"></i>
+            </div>
+            <div class="custom-select-dropdown">
+              <div class="custom-select-option selected" data-value="review" data-i18n="mode_review">先审后发 (安全)</div>
+              <div class="custom-select-option" data-value="auto" data-i18n="mode_auto">全自动发帖 (激进)</div>
+              <div class="custom-select-option" data-value="shadowReply" data-i18n="mode_shadow">影子回复 (仅记录)</div>
+            </div>
+          </div>
+          
           <label><i data-lucide="edit-3" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_custom_prompt">自定义 Prompt 设定</span></label>
           <div id="strategy-prompt-editor" style="margin-bottom: 16px;">
             <textarea id="custom-strategy-prompt" class="modern-input" style="min-height: 100px; resize: vertical; padding: 12px; font-size: 13px; font-family: monospace;" data-i18n-placeholder="placeholder_custom_prompt" placeholder="可以在这里完全重写当前回复流派的底层 Prompt..."></textarea>
