@@ -1570,7 +1570,7 @@ function renderChatConsoleMessages() {
       
     messagesContainer.innerHTML = `
       <div class="x-bot-chat-msg-row assistant">
-        <span class="x-bot-chat-msg-label">Vibe-X</span>
+        <span class="x-bot-chat-msg-label">VibeX</span>
         <div class="x-bot-chat-msg-bubble">${escapeHtml(greetingText)}</div>
       </div>
     `;
@@ -1579,7 +1579,7 @@ function renderChatConsoleMessages() {
   
   messagesContainer.innerHTML = messages.map(msg => {
     const isUser = msg.role === 'user';
-    const label = isUser ? "你" : "Vibe-X";
+    const label = isUser ? "你" : "VibeX";
     const rowClass = isUser ? "user" : "assistant";
     return `
       <div class="x-bot-chat-msg-row ${rowClass}">
@@ -1713,11 +1713,11 @@ function ensureChatConsole() {
       <div class="x-chat-header">
         <div class="x-chat-title-area">
           <div class="x-chat-avatar" style="background: transparent;">
-            <img src="${avatarUrl}" id="x-chat-avatar-img" alt="Vibe-X" style="width: 100%; height: 100%; object-fit: contain; border-radius: 50%;">
+            <img src="${avatarUrl}" id="x-chat-avatar-img" alt="VibeX" style="width: 100%; height: 100%; object-fit: contain; border-radius: 50%;">
           </div>
           <div>
-            <div class="x-chat-title">Vibe-X 智能助手</div>
-            <div class="x-chat-subtitle">Vibe-X AI Core</div>
+            <div class="x-chat-title">VibeX 智能助手</div>
+            <div class="x-chat-subtitle">VibeX AI Core</div>
           </div>
         </div>
         <button class="x-chat-close-btn" id="x-chat-close-btn">&times;</button>
@@ -2790,7 +2790,7 @@ function tUI(msg) {
     '回复': 'Reply',
     '一键仿写': 'One-click Rewrite',
     '智能回复': 'Smart Reply',
-    '烤仔正在思考...': 'Vibe-X is thinking...',
+    '烤仔正在思考...': 'VibeX is thinking...',
     'AI 正在思考...': 'AI is thinking...'
   };
 

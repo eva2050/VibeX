@@ -1,5 +1,5 @@
 /**
- * Vibe-X - Main Controller
+ * VibeX - Main Controller
  * (The Xiaolongxia Standard)
  */
 // GLOBALS
@@ -1042,6 +1042,8 @@ const i18nDict = {
     desc_settings: '系统配置与模型参数。',
     label_apikey: '<i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> 模型 API Key (必填)',
     label_strategy: '<i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> 默认回复策略',
+    label_custom_prompt: '自定义 Prompt 设定',
+    placeholder_custom_prompt: '可以在这里完全重写当前回复流派的底层 Prompt...',
     label_style: '<i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> 风格训练语料 (建议 3-10 条)',
     desc_style: '输入您收集/过往的高赞推文，AI 将深度模仿行文风格与断句习惯。',
     btn_add_style: '添加新语料',
@@ -1105,6 +1107,8 @@ const i18nDict = {
     desc_settings: 'System configuration and model parameters.',
     label_apikey: '<i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> Model API Key (Required)',
     label_strategy: '<i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> Default Reply Strategy',
+    label_custom_prompt: 'Custom Prompt Settings',
+    placeholder_custom_prompt: 'You can completely rewrite the underlying prompt for the current strategy here...',
     label_style: '<i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> Style Training Corpus (3-10 recommended)',
     desc_style: 'Input your collected high-engagement tweets. The AI will deeply mimic the writing style and pacing.',
     btn_add_style: 'Add Corpus',
