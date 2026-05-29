@@ -156,16 +156,14 @@
         <div class="engine-header">
           <h2><i data-lucide="bot" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_engine">自动化</span></h2>
           
-          <div class="control-panel-card" style="background: #F9F9FA; border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin-top: 16px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div style="margin-top: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
               <div style="display: flex; align-items: center; gap: 6px;">
-                <i data-lucide="zap" width="16" height="16" style="color: var(--text-sub);"></i>
-                <span style="font-weight: 600; font-size: 14px; color: var(--text-main);" data-i18n="label_automation_mode">自动化运行模式</span>
+                <span style="font-weight: 500; font-size: 13px; color: var(--text-main);" data-i18n="label_automation_mode">自动化运行模式</span>
                 <i data-lucide="info" width="14" height="14" style="color: var(--text-sub); cursor: help;" title="When enabled, the system runs silent interaction experiments in the background. Recommended for advanced users only." data-i18n-title="desc_engine"></i>
               </div>
               
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <div class="status-badge stopped" id="engine-status-badge" data-i18n="status_stopped">已停止</div>
+              <div style="display: flex; align-items: center;">
                 <label class="toggle-switch" style="margin: 0;">
                   <input type="checkbox" id="engine-toggle">
                   <span class="slider"></span>
@@ -175,7 +173,7 @@
 
             <div class="custom-select-container" id="automation-mode-container" style="margin-bottom: 0;">
               <input type="hidden" id="automation-mode" value="autoReply">
-              <div class="custom-select-trigger" id="automation-mode-trigger" style="background: #fff; border-color: var(--border-color);">
+              <div class="custom-select-trigger" id="automation-mode-trigger" style="background: var(--bg-color); border-color: var(--border-color);">
                 <span data-i18n="mode_auto_reply">全自动回复 (活跃互动)</span>
                 <i data-lucide="chevron-down" width="16" height="16" style="color: var(--text-sub);"></i>
               </div>

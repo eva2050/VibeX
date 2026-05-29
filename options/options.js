@@ -534,15 +534,20 @@ function bindActions() {
   
   if (chrome.storage) {
     chrome.storage.local.get(['isRunning'], (res) => {
-      document.getElementById('engine-toggle').checked = !!res.isRunning;
-      document.getElementById('engine-status-badge').className = res.isRunning ? 'status-badge running' : 'status-badge stopped';
-      document.getElementById('engine-status-badge').textContent = res.isRunning ? '运行中' : '已停止';
+      const toggle = document.getElementById('engine-toggle');
+      if (toggle) toggle.checked = !!res.isRunning;
+      const engineBadge = document.getElementById('engine-status-badge');
+      if (engineBadge) {
+        engineBadge.className = res.isRunning ? 'status-badge running' : 'status-badge stopped';
+        engineBadge.textContent = res.isRunning ? '运行中' : '已停止';
+      }
     });
   }
 }
 
 function updateEngineBadge(isEnabled) {
   const engineBadge = document.getElementById('engine-status-badge');
+  if (!engineBadge) return;
   const langInput = document.getElementById('engine-language');
   let lang = langInput ? langInput.value : 'auto';
   if (lang === 'auto') lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
