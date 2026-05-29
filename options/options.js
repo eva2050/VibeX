@@ -1279,16 +1279,17 @@ function updateApiStatusIndicator() {
   if (!dot || !textSpan) return;
   
   const apiKey = document.getElementById('api-key-input').value.trim();
+  const lang = document.getElementById('engine-language')?.value || 'en';
   
   if (apiKey.length > 10) {
     dot.style.background = '#10B981'; // Green
     dot.classList.add('pulse');
-    textSpan.textContent = currentLang === 'zh' ? '已连接' : 'Connected';
+    textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '已连接' : 'Connected';
     textSpan.style.color = '#10B981';
   } else {
     dot.style.background = '#EF4444'; // Red
     dot.classList.remove('pulse');
-    textSpan.textContent = currentLang === 'zh' ? '未连接' : 'Not Connected';
+    textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '未连接' : 'Not Connected';
     textSpan.style.color = 'var(--text-sub)';
   }
 }
@@ -1301,7 +1302,9 @@ function resetCustomPrompt() {
     
     const btn = document.getElementById('btn-reset-prompt');
     const originalText = btn.innerHTML;
-    btn.innerHTML = `<i data-lucide="check" width="12" height="12"></i> <span style="color: #10B981;">${currentLang === 'zh' ? '已重置' : 'Reset'}</span>`;
+    const lang = document.getElementById('engine-language')?.value || 'en';
+    const isZh = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh');
+    btn.innerHTML = `<i data-lucide="check" width="12" height="12"></i> <span style="color: #10B981;">${isZh ? '已重置' : 'Reset'}</span>`;
     if (window.lucide) window.lucide.createIcons();
     
     setTimeout(() => {
