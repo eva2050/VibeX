@@ -216,8 +216,38 @@ function loadMemory() {
     
     updatePreflightStatus(items.apiKey);
     renderVault(items.draftVault);
+    
+    // Update stats
+    chrome.storage.local.get(['stats'], (res) => {
+      if (res.stats) {
+        const statReplies = document.getElementById('stat-replies');
+        const statSaved = document.getElementById('stat-saved');
+        if (statReplies) statReplies.textContent = res.stats.repliesSent || 0;
+        if (statSaved) statSaved.textContent = res.stats.tweetsProcessed || items.draftVault.length || 0;
+      } else {
+        const statSaved = document.getElementById('stat-saved');
+        if (statSaved) statSaved.textContent = items.draftVault.length || 0;
+      }
+    });
   });
 }
+
+// Listen for stats updates from background
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local') {
+    if (changes.stats) {
+      const stats = changes.stats.newValue;
+      const statReplies = document.getElementById('stat-replies');
+      const statSaved = document.getElementById('stat-saved');
+      if (statReplies) statReplies.textContent = stats.repliesSent || 0;
+      if (statSaved) statSaved.textContent = stats.tweetsProcessed || 0;
+    }
+    if (changes.draftVault) {
+      const statSaved = document.getElementById('stat-saved');
+      if (statSaved) statSaved.textContent = changes.draftVault.newValue.length || 0;
+    }
+  }
+});
 
 function saveMemory() {
   const apiKey = document.getElementById('api-key-input').value.trim();
