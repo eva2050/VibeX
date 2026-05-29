@@ -187,7 +187,7 @@ function loadMemory() {
     
     const replyStrategy = document.getElementById('reply-strategy');
     if (replyStrategy) {
-      replyStrategy.value = items.replyStrategy || '专业流：专业知识 / 数据';
+      replyStrategy.value = items.replyStrategy || '极简流：精辟吐槽 / 玩梗';
       const opt = document.querySelector(`#reply-strategy-container .custom-select-option[data-value="${replyStrategy.value}"]`);
       if (opt) {
         document.querySelector('#reply-strategy-trigger span').textContent = opt.textContent;
@@ -303,7 +303,7 @@ function saveMemory() {
     apiKey: document.getElementById('api-key-input').value.trim(),
     apiProvider: document.getElementById('api-provider')?.value || 'gemini',
     aiModel: document.getElementById('ai-model-input')?.value.trim() || 'gemini-2.5-flash',
-    replyStrategy: document.getElementById('reply-strategy')?.value || '专业流：专业知识 / 数据',
+    replyStrategy: document.getElementById('reply-strategy')?.value || '极简流：精辟吐槽 / 玩梗',
     customPromptGlobal: document.getElementById('custom-strategy-prompt')?.value || '',
     styleTrainingData: Array.from(document.querySelectorAll('#style-training-list textarea')).map(t => t.value.trim()).filter(t => t !== ''),
     engineLanguage: document.getElementById('engine-language')?.value || 'en',
