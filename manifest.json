@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "VibeX: AI Content Engine",
+  "name": "VibeX: AI Copilot for X Growth",
   "version": "1.0",
   "description": "Context-Aware AI Core for X (Twitter)",
   "icons": {
@@ -33,7 +33,7 @@
       "48": "assets/icons/icon-48.png",
       "128": "assets/icons/icon-128.png"
     },
-    "default_title": "VibeX: AI Content Engine"
+    "default_title": "VibeX: AI Copilot for X Growth"
   },
   "options_page": "options/options.html",
   "options_ui": {
