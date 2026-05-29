@@ -35,7 +35,7 @@ console.log("X Auto Bot: Scraper loaded on X.com");
 const REPLY_COOLDOWN_MS = 300000; // 5 minutes
 const REPLY_ATTEMPT_LOCK_MS = 60000; // short lock while the automator tries to send
 const MAX_LOGS = 50;
-const MIN_REPLY_OPPORTUNITY_SCORE = 45;
+const MIN_REPLY_OPPORTUNITY_SCORE = 35;
 const SEARCH_DISCOVERY_MIN_INTERVAL_MS = 90 * 1000;
 const SEARCH_DISCOVERY_ROTATE_INTERVAL_MS = 2 * 60 * 1000;
 const SEARCH_DISCOVERY_LOW_QUALITY_ROTATE_MS = 15 * 1000;
@@ -647,9 +647,17 @@ function maybeNavigateToDiscoverySearch(state = {}, reason = '当前页面没有
 
   const now = Date.now();
   const lastSearchAt = Number(state.lastDiscoverySearchAt) || 0;
-  const minInterval = options.force
-    ? SEARCH_DISCOVERY_LOW_QUALITY_ROTATE_MS
-    : (isSearchPage() ? SEARCH_DISCOVERY_ROTATE_INTERVAL_MS : SEARCH_DISCOVERY_MIN_INTERVAL_MS);
+  
+  let minInterval = SEARCH_DISCOVERY_MIN_INTERVAL_MS;
+  if (options.force) {
+    minInterval = SEARCH_DISCOVERY_LOW_QUALITY_ROTATE_MS;
+  } else if (isSearchPage()) {
+    minInterval = SEARCH_DISCOVERY_ROTATE_INTERVAL_MS;
+  } else if (window.location.pathname === '/home') {
+    // If we are stuck on a messy home page with no candidates, jump to search quickly
+    minInterval = 15 * 1000;
+  }
+  
   if (lastSearchAt && now - lastSearchAt < minInterval) return false;
 
   const currentQuery = getCurrentSearchQuery();
