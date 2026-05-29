@@ -1269,11 +1269,19 @@ function applyLanguage(lang) {
   });
 }
 
-function testApiConnection() {
+function testApiConnection(e) {
+  if (e) e.preventDefault();
+  console.log('[VibeX] Testing API connection...');
+  
   const btn = document.getElementById('btn-test-api');
   const textSpan = document.getElementById('test-api-text');
-  const originalHtml = btn.innerHTML;
   
+  if (!btn || !textSpan) {
+    console.error('[VibeX] Test API button elements not found.');
+    return;
+  }
+  
+  const originalHtml = btn.innerHTML;
   btn.disabled = true;
   textSpan.textContent = currentLang === 'zh' ? '测试中...' : 'Testing...';
   
@@ -1292,6 +1300,7 @@ function testApiConnection() {
       btn.disabled = false;
       btn.style.color = 'var(--text-sub)';
       btn.innerHTML = originalHtml;
+      if (window.lucide) window.lucide.createIcons();
     }, 2000);
   }, 800);
 }
