@@ -825,10 +825,19 @@ let strategyPrompt = '';
         }
         
         let langConstraint = '';
-        const actionName = req.promptType === 'viral_rewrite' ? '重写' : '回复';
-        if (config.engineLanguage === 'zh') langConstraint = `\n【语言约束】：必须使用中文${actionName}。`;
-        else if (config.engineLanguage === 'en') langConstraint = `\n【语言约束】：必须使用英文${actionName}。`;
-        else langConstraint = `\n【语言约束】：请自动识别并使用原推文的语言进行${actionName}。`;
+        if (req.promptType === 'viral_rewrite') {
+          // Rewriting: follow user's language setting
+          if (config.engineLanguage === 'zh') langConstraint = '\n【语言约束】：必须使用中文重写。';
+          else if (config.engineLanguage === 'en') langConstraint = '\n【语言约束】：You MUST rewrite in English.';
+          else langConstraint = '\n【语言约束】：请自动识别原文语言并使用相同语言重写。';
+        } else if (req.promptType === 'draft_reply') {
+          // Reply: always match the original tweet's language
+          langConstraint = '\n【语言约束】：请自动识别原推文的语言，并使用与原推文完全相同的语言进行回复。If the tweet is in English, reply in English. 如果推文是中文，就用中文回复。';
+        } else {
+          if (config.engineLanguage === 'zh') langConstraint = '\n【语言约束】：必须使用中文输出。';
+          else if (config.engineLanguage === 'en') langConstraint = '\n【语言约束】：You MUST output in English.';
+          else langConstraint = '';
+        }
         
         const strictAntiAI = (req.promptType === 'viral_rewrite' || req.promptType === 'draft_reply') ? `
 
