@@ -46,7 +46,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
       
-      chrome.storage.local.set({ isRunning: newState, isAutoPaused: !newState }, () => {
+      const updateObj = { isRunning: newState, isAutoPaused: !newState };
+      if (newState) {
+        updateObj.automationStartTime = Date.now();
+        updateObj.sessionReplyCount = 0;
+        updateObj.sessionPostCount = 0;
+      }
+      chrome.storage.local.set(updateObj, () => {
         updateUI(newState);
       });
     });
@@ -213,13 +219,13 @@ document.addEventListener('DOMContentLoaded', () => {
     element.classList.toggle('warning', Boolean(hasWarning && !isDone));
   }
 
-  function getModeLabel(mode = 'review') {
+  function getModeLabel(mode = 'autoReply') {
     const labels = {
-      auto: '纯自动',
-      review: '先审后发',
-      shadowReply: '影子回复'
+      autoPost: '全自动发帖',
+      autoReply: '全自动回复',
+      browseOnly: '仅浏览存素材'
     };
-    return labels[mode] || labels.review;
+    return labels[mode] || labels.autoReply;
   }
 
   function getDeliveryModeLabel(mode = 'localQueue') {

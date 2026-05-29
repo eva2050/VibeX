@@ -1136,12 +1136,27 @@ let strategyPrompt = '';
   } else if (request.action === "replyCompleted") {
     const author = request.tweetAuthor || '未知用户';
     const replyText = request.replyText || '';
-    const twitterCooldownUntil = Date.now() + REPLY_COOLDOWN_MS;
-    chrome.storage.local.get(['stats'], (res) => {
+    
+    chrome.storage.local.get(['stats', 'sessionReplyCount', 'onboardingStrategy'], (res) => {
       const stats = res.stats || { tweetsProcessed: 0, repliesSent: 0 };
       stats.repliesSent = (stats.repliesSent || 0) + 1;
+      
+      let count = (res.sessionReplyCount || 0) + 1;
+      let nextCooldownMs = REPLY_COOLDOWN_MS;
+      
+      if (res.onboardingStrategy?.automationMode === 'autoReply' && count <= 5) {
+        if (count === 1) nextCooldownMs = 1 * 60 * 1000;
+        else if (count === 2) nextCooldownMs = 3 * 60 * 1000;
+        else if (count === 3) nextCooldownMs = 5 * 60 * 1000;
+        else if (count === 4) nextCooldownMs = 7 * 60 * 1000;
+        else if (count === 5) nextCooldownMs = 9 * 60 * 1000;
+      }
+      
+      const twitterCooldownUntil = Date.now() + nextCooldownMs;
+      
       chrome.storage.local.set({
         stats,
+        sessionReplyCount: count,
         twitterCooldownUntil,
         lastReplySent: {
           tweetAuthor: author,
@@ -1149,7 +1164,9 @@ let strategyPrompt = '';
           time: Date.now()
         }
       }, () => {
-        addLog('success', `确认已回复 @${author}，进入 ${Math.round(REPLY_COOLDOWN_MS / 60000)} 分钟互动冷却`);
+        const cdMins = Math.round(nextCooldownMs / 60000);
+        const burstPrefix = (res.onboardingStrategy?.automationMode === 'autoReply' && count <= 5) ? `[爆发期 第${count}条] ` : '';
+        addLog('success', `确认已回复 @${author}，${burstPrefix}进入 ${cdMins} 分钟互动冷却`);
         sendResponse({ success: true });
       });
     });
@@ -1243,12 +1260,12 @@ function hasPersona(persona) {
   return Boolean(persona && (persona.targetUsers || persona.characteristics || persona.goals));
 }
 
-function getAutomationMode(config = {}) {
-  return config.onboardingStrategy?.automationMode || 'review';
+function getAutomationMode(config) {
+  return config.onboardingStrategy?.automationMode || 'autoReply';
 }
 
 function canAutoPublish(config = {}) {
-  return getAutomationMode(config) === 'auto';
+  return getAutomationMode(config) === 'autoPost';
 }
 
 function getPostDeliveryMode(config = {}) {
@@ -1638,7 +1655,8 @@ function scheduleNextPost() {
   const now = new Date();
   chrome.storage.local.get([
     'postsToday', 'lastPostDate', 'isAutoPaused',
-    'postsPerDay', 'postScheduleMode', 'smartTimeSlots', 'postInterval'
+    'postsPerDay', 'postScheduleMode', 'smartTimeSlots', 'postInterval',
+    'onboardingStrategy', 'automationStartTime', 'sessionPostCount'
   ], (res) => {
     if (res.isAutoPaused) {
       addLog('info', '自动操作已暂停，跳过发推调度');
@@ -1651,6 +1669,21 @@ function scheduleNextPost() {
     if (postsToday >= postsPerDay) {
       addLog('info', `今日已发 ${postsToday}/${postsPerDay} 条，暂停发推至次日`);
       scheduleForTomorrow(now, res);
+      return;
+    }
+
+    if (res.onboardingStrategy?.automationMode === 'autoPost') {
+      const pCount = res.sessionPostCount || 0;
+      const startTime = res.automationStartTime || Date.now();
+      let delayMs;
+      if (pCount === 0) delayMs = 10 * 60000;
+      else if (pCount === 1) delayMs = 40 * 60000;
+      else if (pCount === 2) delayMs = 100 * 60000;
+      else delayMs = 100 * 60000 + (pCount - 2) * 90 * 60000; // Increment
+      
+      const targetTimeMs = Math.max(now.getTime() + 60000, startTime + delayMs);
+      const targetTime = new Date(targetTimeMs);
+      setAlarmAtDate(targetTime, `全自动发帖：按渐进调度计划 ${targetTime.toLocaleString()} 发推`);
       return;
     }
 
@@ -1953,7 +1986,7 @@ function triggerPostInTab() {
 }
 
 function handlePostCompleted(source) {
-  chrome.storage.local.get(['postsToday', 'lastPostDate', 'tweetQueue', 'pendingPost', 'pendingPostId', 'nativeScheduledCount'], (result) => {
+  chrome.storage.local.get(['postsToday', 'lastPostDate', 'tweetQueue', 'pendingPost', 'pendingPostId', 'nativeScheduledCount', 'sessionPostCount'], (result) => {
     const updates = {
       pendingPost: null,
       pendingPostId: null,
@@ -1963,6 +1996,18 @@ function handlePostCompleted(source) {
       pauseReason: ''
     };
 
+    const finalize = () => {
+      chrome.storage.local.set(updates, () => {
+        chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
+        if (source === POST_DELIVERY_MODE_X_SCHEDULE) {
+          setTimeout(scheduleNativeQueue, 2500);
+        } else {
+          checkAndSetupAlarm();
+        }
+        chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
+      });
+    };
+
     if (source === 'queue') {
       const now = new Date();
       const todayStr = now.toDateString();
@@ -1970,27 +2015,21 @@ function handlePostCompleted(source) {
       if (result.lastPostDate !== todayStr) postsToday = 0;
       updates.postsToday = postsToday + 1;
       updates.lastPostDate = todayStr;
+      updates.sessionPostCount = (result.sessionPostCount || 0) + 1;
       const queue = normalizeDraftQueue(result.tweetQueue);
       updates.tweetQueue = removeCompletedQueueItem(queue, result.pendingPostId, result.pendingPost);
       addLog('success', `队列推文发送成功，今日已发 ${updates.postsToday} 条`);
+      finalize();
     } else if (source === POST_DELIVERY_MODE_X_SCHEDULE) {
       const queue = normalizeDraftQueue(result.tweetQueue);
       updates.tweetQueue = removeCompletedQueueItem(queue, result.pendingPostId, result.pendingPost);
       updates.nativeScheduledCount = (Number(result.nativeScheduledCount) || 0) + 1;
       addLog('success', `X 原生定时发布写入成功，剩余 ${updates.tweetQueue.length} 条待处理`);
+      finalize();
     } else {
       addLog('success', '测试推文发送成功');
+      finalize();
     }
-
-    chrome.storage.local.set(updates, () => {
-      chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
-      if (source === POST_DELIVERY_MODE_X_SCHEDULE) {
-        setTimeout(scheduleNativeQueue, 2500);
-      } else {
-        checkAndSetupAlarm();
-      }
-      chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
-    });
   });
 }
 
@@ -2529,7 +2568,7 @@ ${playbookCatalog}
   "preferredLanguage": "en|ja|ko|zh-CN|zh-TW",
   "targetTimezone": "Asia/Shanghai|America/Los_Angeles|America/New_York|Europe/London|Asia/Tokyo|Asia/Seoul",
   "growthGoal": "首月新增 1000 粉丝",
-  "automationMode": "review",
+  "automationMode": "autoReply",
   "recommendedInteractionTargets": ["handle1", "handle2"],
   "firstTweetText": "从 firstTweetCandidates 中选择总分最高的一条",
   "firstTweetCandidates": [
@@ -2630,7 +2669,7 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
     preferredLanguage: pick(parsed.preferredLanguage, ['en', 'ja', 'ko', 'zh-CN', 'zh-TW'], 'zh-CN'),
     targetTimezone: pick(parsed.targetTimezone, ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'Asia/Seoul'], 'Asia/Shanghai'),
     growthGoal: memoryValueToText(parsed.growthGoal) || '首月新增 1000 粉丝',
-    automationMode: pick(parsed.automationMode, ['auto', 'review', 'shadowReply'], 'review'),
+    automationMode: pick(parsed.automationMode, ['autoPost', 'autoReply', 'browseOnly'], 'autoReply'),
     recommendedInteractionTargets: recommendedInteractionTargets.split('\n').filter(Boolean),
     firstTweetText: bestViralCandidate(parsed.firstTweetCandidates, memoryValueToText(parsed.firstTweetText)),
     firstTweetCandidates: Array.isArray(parsed.firstTweetCandidates) ? parsed.firstTweetCandidates : [],

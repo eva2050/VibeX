@@ -1022,15 +1022,15 @@ function getTweetBotId(tweetNode, author, text) {
 }
 
 function getAutomationMode(state = {}) {
-  return state.onboardingStrategy?.automationMode || 'review';
+  return state.onboardingStrategy?.automationMode || 'autoReply';
 }
 
 function shouldGenerateReplySuggestion(mode) {
-  return mode === 'auto' || mode === 'shadowReply' || mode === 'review';
+  return mode === 'autoReply';
 }
 
 function shouldSendReply(mode) {
-  return mode === 'auto';
+  return mode === 'autoReply';
 }
 
 let processedTweetIds = new Set();
@@ -1057,7 +1057,8 @@ function scrapeTweets() {
     'isRunning', 'isAutoPaused', 'aiPersona', 'agentMemory', 'competitorReport',
     'twitterCooldownUntil', 'apiCooldownUntil', 'onboardingStrategy', 'targetUsers',
     'pendingReply', 'pendingPost', 'lastDiscoverySearchAt', 'discoverySearchIndex',
-    'currentDiscoveryQuery', 'lastSurfaceNavigationAt'
+    'currentDiscoveryQuery', 'lastSurfaceNavigationAt',
+    'automationStartTime', 'sessionReplyCount', 'sessionPostCount'
   ], (result) => {
     if (!result.isRunning) return;
     if (result.isAutoPaused) {
@@ -1121,9 +1122,14 @@ function scrapeTweets() {
       }
 
       const opportunity = getReplyOpportunity(article, author, text, result);
-      if (opportunity.score < MIN_REPLY_OPPORTUNITY_SCORE) {
+      let effectiveMinScore = MIN_REPLY_OPPORTUNITY_SCORE;
+      if (automationMode === 'autoReply' && (result.sessionReplyCount || 0) < 5) {
+        effectiveMinScore = 15; // Burst mode: lower threshold
+      }
+
+      if (opportunity.score < effectiveMinScore) {
         rememberProcessedTweet(tweetId);
-        addLog('info', `跳过 @${author}: 互动机会分 ${opportunity.score} 低于 ${MIN_REPLY_OPPORTUNITY_SCORE}（${opportunity.reasons.join('、')}）`);
+        addLog('info', `跳过 @${author}: 互动机会分 ${opportunity.score} 低于 ${effectiveMinScore}（${opportunity.reasons.join('、')}）`);
         continue;
       }
 

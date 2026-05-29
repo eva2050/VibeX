@@ -140,7 +140,7 @@ function loadMemory() {
 
     const automationModeInput = document.getElementById('automation-mode');
     if (automationModeInput) {
-      automationModeInput.value = items.onboardingStrategy?.automationMode || 'review';
+      automationModeInput.value = items.onboardingStrategy?.automationMode || 'autoReply';
       const opt = document.querySelector(`#automation-mode-container .custom-select-option[data-value="${automationModeInput.value}"]`);
       if (opt) {
         document.querySelector('#automation-mode-trigger span').textContent = opt.textContent;
@@ -514,11 +514,16 @@ function bindActions() {
 
   engineToggle.addEventListener('change', (e) => {
     const isEnabled = e.target.checked;
-    updateEngineBadge(isEnabled);
-    if (chrome.storage) {
-      chrome.storage.local.set({ isRunning: isEnabled, isAutoPaused: !isEnabled });
+    const updateObj = { isRunning: isEnabled, isAutoPaused: !isEnabled };
+    if (isEnabled) {
+      updateObj.automationStartTime = Date.now();
+      updateObj.sessionReplyCount = 0;
+      updateObj.sessionPostCount = 0;
     }
-    addLog(isEnabled ? t('log_engine_start') : t('log_engine_stop'), isEnabled ? 'system' : 'error');
+    chrome.storage.local.set(updateObj, () => {
+      updateEngineBadge(isEnabled);
+      addLog(isEnabled ? t('log_engine_start') : t('log_engine_stop'), isEnabled ? 'system' : 'error');
+    });
   });
   
   if (chrome.storage) {
@@ -1068,9 +1073,9 @@ const i18nDict = {
     label_apikey: '<i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> 模型 API Key (必填)',
     label_strategy: '<i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> 默认回复策略',
     label_automation_mode: '<i data-lucide="zap" width="16" height="16" style="color: var(--text-sub);"></i> 自动化运行模式',
-    mode_review: '先审后发 (安全)',
-    mode_auto: '全自动发帖 (激进)',
-    mode_shadow: '影子回复 (仅记录)',
+    mode_auto_post: '全自动发帖 (原创输出)',
+    mode_auto_reply: '全自动回复 (活跃互动)',
+    mode_browse_only: '仅浏览存素材 (静默收集)',
     label_custom_prompt: '自定义 Prompt 设定',
     placeholder_custom_prompt: '可以在这里完全重写当前回复流派的底层 Prompt...',
     label_style: '<i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> 风格训练语料',
@@ -1137,9 +1142,9 @@ const i18nDict = {
     label_apikey: '<i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> Model API Key (Required)',
     label_strategy: '<i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> Default Reply Strategy',
     label_automation_mode: '<i data-lucide="zap" width="16" height="16" style="color: var(--text-sub);"></i> Automation Mode',
-    mode_review: 'Review Before Publish (Safe)',
-    mode_auto: 'Auto Publish (Aggressive)',
-    mode_shadow: 'Shadow Reply (Log Only)',
+    mode_auto_post: 'Auto Post (Original Content)',
+    mode_auto_reply: 'Auto Reply (Active Engagement)',
+    mode_browse_only: 'Browse & Save Only (Silent Collection)',
     label_custom_prompt: 'Custom Prompt Settings',
     placeholder_custom_prompt: 'You can completely rewrite the underlying prompt for the current strategy here...',
     label_style: '<i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> Style Training Corpus',
