@@ -735,13 +735,21 @@ chrome.runtime.onInstalled.addListener((details) => {
 // 处理来自 content scripts 或 popup 的消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "testApiConnection") {
-    // Ping Gemini or OpenAI with a minimal request to verify the key
+    // Ping the LLM with a minimal request to verify the key
     const pingPrompt = "ping";
-    chrome.storage.local.get(['apiProvider', 'aiModel'], (items) => {
+    const provider = request.apiProvider || 'gemini';
+    const defaultModels = {
+      gemini: 'gemini-2.5-flash',
+      deepseek: 'deepseek-chat',
+      openai: 'gpt-4o-mini',
+      openrouter: 'google/gemini-2.5-flash',
+      qwen: 'qwen-plus'
+    };
+    chrome.storage.local.get(['aiModel'], (items) => {
       callLLM(pingPrompt, { 
         apiKey: request.apiKey, 
-        apiProvider: items.apiProvider || 'gemini', 
-        aiModel: items.aiModel || 'gemini-1.5-flash' 
+        apiProvider: provider, 
+        aiModel: items.aiModel || defaultModels[provider] || 'gemini-2.5-flash' 
       }, false)
         .then(() => sendResponse({ success: true }))
         .catch(err => sendResponse({ success: false, error: err.message }));

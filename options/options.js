@@ -1383,7 +1383,7 @@ function updateApiStatusIndicator() {
     // Ping background script after 800ms debounce
     apiVerificationTimer = setTimeout(() => {
       if (chrome && chrome.runtime) {
-        chrome.runtime.sendMessage({ action: "testApiConnection", apiKey: apiKey }, (response) => {
+        chrome.runtime.sendMessage({ action: "testApiConnection", apiKey: apiKey, apiProvider: document.getElementById('api-provider')?.value || 'gemini' }, (response) => {
           if (response && response.success) {
             dot.style.background = '#10B981'; // Green
             dot.classList.add('pulse');
