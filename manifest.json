@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "VibeX：你的智能内容引擎",
+  "name": "VibeX: AI Content Engine",
   "version": "1.0",
   "description": "Context-Aware AI Core for X (Twitter)",
   "icons": {
@@ -33,7 +33,7 @@
       "48": "assets/icons/icon-48.png",
       "128": "assets/icons/icon-128.png"
     },
-    "default_title": "VibeX：你的智能内容引擎"
+    "default_title": "VibeX: AI Content Engine"
   },
   "options_page": "options/options.html",
   "options_ui": {

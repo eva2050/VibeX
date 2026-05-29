@@ -1026,7 +1026,7 @@ function getAutomationMode(state = {}) {
 }
 
 function shouldGenerateReplySuggestion(mode) {
-  return mode === 'auto' || mode === 'shadowReply';
+  return mode === 'auto' || mode === 'shadowReply' || mode === 'review';
 }
 
 function shouldSendReply(mode) {
