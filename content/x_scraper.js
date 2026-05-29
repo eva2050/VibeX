@@ -268,9 +268,18 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 });
 
 // Initial check for auto-scroll
-chrome.storage.local.get(['profileReadRequested'], (result) => {
-  // Turn off automation on page refresh by default per user request
-  chrome.storage.local.set({ isRunning: false, isAutoPaused: true });
+chrome.storage.local.get(['profileReadRequested', 'isBotNavigating', 'isRunning'], (result) => {
+  if (result.isBotNavigating) {
+    // Bot is navigating itself (e.g. rotating keywords), do not pause.
+    chrome.storage.local.set({ isBotNavigating: false });
+    if (result.isRunning) {
+      startAutoScroll();
+      ensureBioExtracted();
+    }
+  } else {
+    // Turn off automation on manual page refresh by default per user request
+    chrome.storage.local.set({ isRunning: false, isAutoPaused: true });
+  }
   
   if (result.profileReadRequested) {
     ensureBioExtracted({ force: true });
@@ -673,7 +682,8 @@ function maybeNavigateToDiscoverySearch(state = {}, reason = '当前页面没有
     lastDiscoverySearchAt: now,
     discoverySearchIndex: (nextIndex + 1) % queries.length,
     currentDiscoveryQuery: query,
-    currentDiscoveryReason: reason
+    currentDiscoveryReason: reason,
+    isBotNavigating: true
   });
   addLog('info', `切换到关键词热帖搜索：${query}`);
   window.location.assign(url);
@@ -694,7 +704,8 @@ function maybeNavigateToHomeSurface(state = {}, reason = '当前页面不是发�
   chrome.storage.local.set({
     lastSurfaceNavigationAt: now,
     currentDiscoveryQuery: '',
-    currentDiscoveryReason: reason
+    currentDiscoveryReason: reason,
+    isBotNavigating: true
   });
   addLog('info', `当前不在推荐/搜索流，先进入推荐页：${reason}`);
   window.location.assign('https://x.com/home');
