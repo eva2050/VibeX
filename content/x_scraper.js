@@ -1021,6 +1021,7 @@ let apiCooldownUntil = 0;
 
 function rememberProcessedTweet(tweetId) {
   processedTweetIds.add(tweetId);
+  incrementProcessedTweets();
   if (processedTweetIds.size > 500) {
     const oldest = processedTweetIds.values().next().value;
     processedTweetIds.delete(oldest);
@@ -1122,7 +1123,6 @@ function scrapeTweets() {
     rememberProcessedTweet(selected.tweetId);
 
     addLog('info', `选择互动 @${selected.author}: 机会分 ${selected.opportunity.score}（${selected.opportunity.reasons.join('、')}）`);
-    incrementProcessedTweets();
 
     isReplying = true;
     chrome.storage.local.set({ isGeneratingReply: true });
