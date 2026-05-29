@@ -62,33 +62,6 @@ function initCore() {
   const btnAddStyle = document.getElementById('btn-add-style');
   if (btnAddStyle) btnAddStyle.addEventListener('click', () => addStyleItem());
   
-  // Reply strategy dropdown
-  const strategyContainer = document.getElementById('reply-strategy-container');
-  if (strategyContainer) {
-    strategyContainer.addEventListener('click', (e) => {
-      const trigger = e.target.closest('.custom-select-trigger');
-      if (trigger) {
-        strategyContainer.classList.toggle('open');
-      }
-      const opt = e.target.closest('.custom-select-option');
-      if (opt) {
-        const selectedValue = opt.getAttribute('data-value');
-        document.getElementById('reply-strategy').value = selectedValue;
-        saveMemory();
-        
-        // Show custom prompt editor ONLY when custom strategy is selected
-        const customPromptEditor = document.getElementById('strategy-prompt-editor');
-        if (customPromptEditor) {
-          if (selectedValue && selectedValue.includes('自定义流')) {
-            customPromptEditor.style.display = 'block';
-          } else {
-            customPromptEditor.style.display = 'none';
-          }
-        }
-      }
-    });
-  }
-  
   const btnResetPrompt = document.getElementById('btn-reset-prompt');
   if (btnResetPrompt) btnResetPrompt.addEventListener('click', resetCustomPrompt);
 
@@ -906,13 +879,19 @@ function setupCustomSelects() {
         container.classList.remove('open');
         
         // Handle custom prompt switching
-        if (hiddenInput.id === 'reply-strategy' && window.customPrompts) {
-          const promptEditor = document.getElementById('custom-strategy-prompt');
-          if (promptEditor) {
+        if (hiddenInput.id === 'reply-strategy') {
+          const customPromptEditor = document.getElementById('strategy-prompt-editor');
+          if (customPromptEditor) {
             const val = hiddenInput.value;
-            if (val.includes('杠精')) promptEditor.value = window.customPrompts.contrarian;
-            else if (val.includes('专业')) promptEditor.value = window.customPrompts.expert;
-            else if (val.includes('极简')) promptEditor.value = window.customPrompts.minimal;
+            if (val.includes('自定义流')) {
+              customPromptEditor.style.display = 'block';
+              if (window.customPrompts) {
+                const promptTextArea = document.getElementById('custom-strategy-prompt');
+                if (promptTextArea) promptTextArea.value = window.customPrompts.custom;
+              }
+            } else {
+              customPromptEditor.style.display = 'none';
+            }
           }
         }
         
@@ -1139,11 +1118,12 @@ const i18nDict = {
     theme_light: '白天模式',
     theme_dark: '黑夜模式',
     label_language: '语言',
-    placeholder_input: '输入文本/链接...',
-    placeholder_style: '粘贴一条过往的高赞推文...',
     strategy_contrarian: '杠精流：犀利观点 / 争议',
     strategy_expert: '专业流：专业知识 / 数据',
     strategy_minimal: '极简流：精辟吐槽 / 玩梗',
+    strategy_custom: '自定义流：完全自定义',
+    placeholder_input: '输入文本/链接...',
+    placeholder_style: '粘贴一条过往的高赞推文...',
     vault_empty: '储备库空空如也，快去收集和洗稿吧！',
     vault_delete: '删除',
     vault_copy: '复制',
@@ -1186,6 +1166,10 @@ const i18nDict = {
     mode_auto_reply: 'Auto Reply (Active Engagement)',
     mode_browse_only: 'Browse & Save Only (Silent Collection)',
     label_custom_prompt: 'Custom Prompt Settings',
+    strategy_contrarian: 'Contrarian & Sharp',
+    strategy_expert: 'Expert & Data-driven',
+    strategy_minimal: 'Minimal & Witty',
+    strategy_custom: 'Custom Strategy',
     btn_reset_prompt: 'Reset',
     placeholder_custom_prompt: 'You can completely rewrite the underlying prompt for the current strategy here...',
     label_style: 'Style Training Corpus',
@@ -1211,9 +1195,6 @@ const i18nDict = {
     label_language: 'Language',
     placeholder_input: 'Enter text/link...',
     placeholder_style: 'Paste a high-engagement tweet...',
-    strategy_contrarian: 'Contrarian & Sharp',
-    strategy_expert: 'Value-add & Analytical',
-    strategy_minimal: 'Sassy & Witty',
     vault_empty: 'Your library is empty. Start collecting and rewriting!',
     vault_delete: 'Delete',
     vault_copy: 'Copy',
