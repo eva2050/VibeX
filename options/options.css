@@ -968,3 +968,10 @@ body.dark-theme .custom-select-dropdown { background: #2A2A2A; border-color: var
   opacity: 1;
   visibility: visible;
 }
+
+/* DEBUG STYLES FOR ICONS */
+.lucide, [data-lucide] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
