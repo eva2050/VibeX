@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
       
-      chrome.storage.local.set({ isRunning: newState }, () => {
+      chrome.storage.local.set({ isRunning: newState, isAutoPaused: !newState }, () => {
         updateUI(newState);
       });
     });
