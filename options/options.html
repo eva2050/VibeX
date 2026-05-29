@@ -48,11 +48,11 @@
           </div>
           <div id="generation-result" class="hover-copy-card hidden" title="点击复制文案" data-i18n-title="hint_click_copy" data-copy-hint="点击即可复制" data-i18n-attr="data-copy-hint:hint_click_copy"></div>
           <div style="display: flex; gap: 8px; margin-top: 16px;">
-              <button class="magic-btn outline" id="btn-regenerate" style="flex: 1;" data-i18n="btn_regenerate">
-                <i data-lucide="refresh-cw" width="16" height="16"></i> 重新生成
+              <button class="magic-btn outline" id="btn-regenerate" style="flex: 1;">
+                <i data-lucide="refresh-cw" width="16" height="16"></i> <span data-i18n="btn_regenerate">重新生成</span>
               </button>
-              <button class="magic-btn outline" id="btn-save-library" style="flex: 1;" data-i18n="btn_save">
-                <i data-lucide="bookmark" width="16" height="16"></i> 保存
+              <button class="magic-btn outline" id="btn-save-library" style="flex: 1;">
+                <i data-lucide="bookmark" width="16" height="16"></i> <span data-i18n="btn_save">保存</span>
               </button>
             </div>
         </div>
@@ -77,7 +77,7 @@
 
         <div class="glass-form" style="margin-top: 16px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <label data-i18n="label_apikey" style="margin-bottom: 0;"><i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> 模型 API Key (必填)</label>
+            <label style="margin-bottom: 0;"><i data-lucide="key" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_apikey">模型 API Key (必填)</span></label>
             <div id="api-status-container" style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-sub);">
               <div class="context-indicator" id="api-status-dot" style="margin-right: 0; background: #EF4444;"></div>
               <span id="api-status-text">未连接</span>
@@ -85,7 +85,7 @@
           </div>
           <input type="password" id="api-key-input" placeholder="sk-..." class="modern-input" style="margin-bottom: 16px;">
           
-          <label data-i18n="label_strategy"><i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> 默认回复策略</label>
+          <label><i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_strategy">默认回复策略</span></label>
           <div class="custom-select-container" id="reply-strategy-container" style="margin-bottom: 16px;">
             <input type="hidden" id="reply-strategy" value="专业流：专业知识 / 数据">
             <div class="custom-select-trigger" id="reply-strategy-trigger">
@@ -111,7 +111,7 @@
           </div>
           
           
-          <label data-i18n="label_style"><i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> 风格训练语料</label>
+          <label><i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_style">风格训练语料</span></label>
 
           <div id="style-training-list" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px;">
             <!-- Dynamic items -->
@@ -120,7 +120,7 @@
             <i data-lucide="plus" width="16" height="16" style="margin-right: 6px;"></i> <span data-i18n="btn_add_style">添加新语料</span>
           </button>
           
-          <label style="margin-top: 12px;" data-i18n="label_theme"><i data-lucide="moon" width="16" height="16" style="color: var(--text-sub);"></i> 界面主题</label>
+          <label style="margin-top: 12px;"><i data-lucide="moon" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_theme">界面主题</span></label>
           <div class="custom-select-container" id="ui-theme-container" style="margin-bottom: 16px;">
             <input type="hidden" id="ui-theme" value="auto">
             <div class="custom-select-trigger" id="ui-theme-trigger">
@@ -134,7 +134,7 @@
             </div>
           </div>
 
-          <label style="margin-top: 12px;" data-i18n="label_language"><i data-lucide="globe" width="16" height="16" style="color: var(--text-sub);"></i> 语言</label>
+          <label style="margin-top: 12px;"><i data-lucide="globe" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_language">语言</span></label>
           <div class="custom-select-container" id="engine-language-container" style="margin-bottom: 120px;">
             <input type="hidden" id="engine-language" value="en">
             <div class="custom-select-trigger" id="engine-language-trigger">
