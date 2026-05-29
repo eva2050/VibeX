@@ -737,9 +737,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "testApiConnection") {
     // Ping Gemini or OpenAI with a minimal request to verify the key
     const pingPrompt = "ping";
-    callLLM(pingPrompt, { apiKey: request.apiKey, apiProvider: request.apiProvider || 'gemini', aiModel: request.aiModel || 'gemini-1.5-flash' }, false)
-      .then(() => sendResponse({ success: true }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
+    chrome.storage.local.get(['apiProvider', 'aiModel'], (items) => {
+      callLLM(pingPrompt, { 
+        apiKey: request.apiKey, 
+        apiProvider: items.apiProvider || 'gemini', 
+        aiModel: items.aiModel || 'gemini-1.5-flash' 
+      }, false)
+        .then(() => sendResponse({ success: true }))
+        .catch(err => sendResponse({ success: false, error: err.message }));
+    });
     return true;
   } else if (request.action === "generateReply") {
     addLog('info', '收到回复生成请求，调用 AI 接口...');
