@@ -923,9 +923,9 @@ body.dark-theme .custom-select-dropdown { background: #2A2A2A; border-color: var
 .custom-tooltip::after {
   content: attr(data-tooltip);
   position: absolute;
-  bottom: calc(100% + 8px);
+  top: calc(100% + 8px);
   left: 50%;
-  transform: translateX(-50%) translateY(4px);
+  transform: translateX(-50%) translateY(-4px);
   background: var(--text-main);
   color: var(--bg-color);
   padding: 8px 12px;
@@ -946,11 +946,11 @@ body.dark-theme .custom-select-dropdown { background: #2A2A2A; border-color: var
 .custom-tooltip::before {
   content: "";
   position: absolute;
-  bottom: 100%;
+  top: 100%;
   left: 50%;
   transform: translateX(-50%);
   border: 4px solid transparent;
-  border-top-color: var(--text-main);
+  border-bottom-color: var(--text-main);
   opacity: 0;
   visibility: hidden;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -969,9 +969,3 @@ body.dark-theme .custom-select-dropdown { background: #2A2A2A; border-color: var
   visibility: visible;
 }
 
-/* DEBUG STYLES FOR ICONS */
-.lucide, [data-lucide] {
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-}
