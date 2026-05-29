@@ -445,6 +445,7 @@ function bindActions() {
         const defaults = {
           gemini: 'gemini-2.5-flash',
           deepseek: 'deepseek-chat',
+          openai: 'gpt-4o-mini',
           openrouter: 'google/gemini-2.5-flash',
           qwen: 'qwen-plus'
         };
@@ -460,7 +461,48 @@ function bindActions() {
     saveMemory();
     updateApiStatusIndicator();
   });
-  document.getElementById('api-key-input').addEventListener('input', updateApiStatusIndicator);
+  document.getElementById('api-key-input').addEventListener('input', (e) => {
+    // Auto-detect provider based on key format
+    const key = e.target.value.trim();
+    if (key.length > 0) {
+      let detectedProvider = null;
+      if (key.startsWith('AIza')) detectedProvider = 'gemini';
+      else if (key.startsWith('sk-or-v1-')) detectedProvider = 'openrouter';
+      else if (key.startsWith('sk-proj-')) detectedProvider = 'openai';
+      else if (key.startsWith('sk-') && key.length === 35) detectedProvider = 'deepseek';
+      else if (key.startsWith('sk-') && key.length === 32) detectedProvider = 'qwen';
+      else if (key.startsWith('sk-') && key.length > 40) detectedProvider = 'openai';
+      
+      if (detectedProvider) {
+        const providerSelect = document.getElementById('api-provider');
+        if (providerSelect && providerSelect.value !== detectedProvider) {
+          providerSelect.value = detectedProvider;
+          
+          // Update UI
+          const opt = document.querySelector(`#api-provider-container .custom-select-option[data-value="${detectedProvider}"]`);
+          if (opt) {
+            document.querySelector('#api-provider-trigger span').textContent = opt.textContent;
+            document.querySelectorAll('#api-provider-container .custom-select-option').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+          }
+          
+          // Auto fill model
+          const modelInput = document.getElementById('ai-model-input');
+          if (modelInput) {
+            const defaults = {
+              gemini: 'gemini-2.5-flash',
+              deepseek: 'deepseek-chat',
+              openai: 'gpt-4o-mini',
+              openrouter: 'google/gemini-2.5-flash',
+              qwen: 'qwen-plus'
+            };
+            modelInput.value = defaults[detectedProvider] || defaults.gemini;
+          }
+        }
+      }
+    }
+    updateApiStatusIndicator();
+  });
   
   // Auto-save listeners
   const apiInput = document.getElementById('api-key-input');
@@ -1175,6 +1217,8 @@ const i18nDict = {
     theme_light: '白天模式',
     theme_dark: '黑夜模式',
     label_language: '语言',
+    label_api_provider: 'AI 服务商',
+    label_ai_model: '模型名称',
     strategy_contrarian: '杠精流：犀利观点 / 争议',
     strategy_expert: '专业流：专业知识 / 数据',
     strategy_minimal: '极简流：精辟吐槽 / 玩梗',

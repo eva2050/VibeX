@@ -1559,11 +1559,12 @@ async function callLLM(prompt, config, requireJson = false, onChunk = null) {
     }
   }
   
-  // OpenAI-compatible providers: openrouter, qwen, deepseek
+  // OpenAI-compatible providers: openrouter, qwen, deepseek, openai
   const endpoints = {
     openrouter: 'https://openrouter.ai/api/v1/chat/completions',
     qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-    deepseek: 'https://api.deepseek.com/chat/completions'
+    deepseek: 'https://api.deepseek.com/chat/completions',
+    openai: 'https://api.openai.com/v1/chat/completions'
   };
   
   const endpoint = endpoints[provider];
