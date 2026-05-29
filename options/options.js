@@ -670,7 +670,14 @@ function renderVault(vault) {
   }
   
   if (!vault || vault.length === 0) {
-    feed.innerHTML = `<div style="color:#86868b;text-align:center;padding:40px 0;font-size:13px;">${t('vault_empty')}</div>`;
+    feed.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 120px 20px; color: var(--text-sub); text-align: center;">
+        <i data-lucide="package-open" style="width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.5;"></i>
+        <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px; color: var(--text-main);">${t('vault_empty_title')}</div>
+        <div style="font-size: 14px; opacity: 0.8; line-height: 1.6;">${t('vault_empty_desc')}</div>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
     return;
   }
 
@@ -1124,7 +1131,8 @@ const i18nDict = {
     strategy_custom: '自定义流：完全自定义',
     placeholder_input: '输入文本/链接...',
     placeholder_style: '粘贴一条过往的高赞推文...',
-    vault_empty: '储备库空空如也，快去收集和洗稿吧！',
+    vault_empty_title: '储备库空空如也',
+    vault_empty_desc: '快去收集和洗稿吧！',
     vault_delete: '删除',
     vault_copy: '复制',
     log_config_updated: '系统配置已更新。',
@@ -1195,7 +1203,8 @@ const i18nDict = {
     label_language: 'Language',
     placeholder_input: 'Enter text/link...',
     placeholder_style: 'Paste a high-engagement tweet...',
-    vault_empty: 'Your library is empty. Start collecting and rewriting!',
+    vault_empty_title: 'Your library is empty',
+    vault_empty_desc: 'Start collecting and rewriting!',
     vault_delete: 'Delete',
     vault_copy: 'Copy',
     log_config_updated: 'System config updated.',
