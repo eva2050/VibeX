@@ -435,43 +435,29 @@ function handleNewContext(type, data) {
 function bindActions() {
   document.getElementById('api-key-input').addEventListener('blur', saveMemory);
   document.getElementById('api-key-input').addEventListener('input', (e) => {
-    // Auto-detect provider based on key format
+    // Auto-detect provider based on key prefix
     const key = e.target.value.trim();
-    if (key.length > 0) {
+    if (key.length > 5) {
       let detectedProvider = null;
       if (key.startsWith('AIza')) detectedProvider = 'gemini';
-      else if (key.startsWith('sk-or-v1-')) detectedProvider = 'openrouter';
-      else if (key.startsWith('sk-proj-')) detectedProvider = 'openai';
-      else if (key.startsWith('sk-') && key.length === 35) detectedProvider = 'deepseek';
-      else if (key.startsWith('sk-') && key.length === 32) detectedProvider = 'qwen';
-      else if (key.startsWith('sk-') && key.length > 40) detectedProvider = 'openai';
+      else if (key.startsWith('sk-or-v1-') || key.startsWith('sk-or-')) detectedProvider = 'openrouter';
+      else if (key.startsWith('sk-proj-') || key.startsWith('sk-svcacct-')) detectedProvider = 'openai';
+      else if (key.startsWith('sk-ant-')) detectedProvider = 'openrouter'; // Anthropic via OpenRouter
+      else if (key.startsWith('sk-')) detectedProvider = 'deepseek'; // Default sk- to DeepSeek
       
       if (detectedProvider) {
-        const providerSelect = document.getElementById('api-provider');
-        if (providerSelect && providerSelect.value !== detectedProvider) {
-          providerSelect.value = detectedProvider;
-          
-          // Update UI
-          const opt = document.querySelector(`#api-provider-container .custom-select-option[data-value="${detectedProvider}"]`);
-          if (opt) {
-            document.querySelector('#api-provider-trigger span').textContent = opt.textContent;
-            document.querySelectorAll('#api-provider-container .custom-select-option').forEach(o => o.classList.remove('selected'));
-            opt.classList.add('selected');
-          }
-          
-          // Auto fill model
-          const modelInput = document.getElementById('ai-model-input');
-          if (modelInput) {
-            const defaults = {
-              gemini: 'gemini-2.5-flash',
-              deepseek: 'deepseek-chat',
-              openai: 'gpt-4o-mini',
-              openrouter: 'google/gemini-2.5-flash',
-              qwen: 'qwen-plus'
-            };
-            modelInput.value = defaults[detectedProvider] || defaults.gemini;
-          }
-        }
+        const providerInput = document.getElementById('api-provider');
+        const modelInput = document.getElementById('ai-model-input');
+        const defaults = {
+          gemini: 'gemini-2.5-flash',
+          deepseek: 'deepseek-chat',
+          openai: 'gpt-4o-mini',
+          openrouter: 'google/gemini-2.5-flash',
+          qwen: 'qwen-plus'
+        };
+        if (providerInput) providerInput.value = detectedProvider;
+        if (modelInput) modelInput.value = defaults[detectedProvider] || 'gemini-2.5-flash';
+        saveMemory();
       }
     }
     updateApiStatusIndicator();
