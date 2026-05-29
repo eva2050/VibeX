@@ -124,6 +124,9 @@ function loadMemory() {
   chrome.storage.local.get({
     apiKey: '',
     replyStrategy: '',
+    customPromptContrarian: '',
+    customPromptExpert: '',
+    customPromptMinimal: '',
     styleTrainingData: '',
     engineLanguage: 'en',
     uiTheme: 'auto',
@@ -142,6 +145,31 @@ function loadMemory() {
         document.querySelector('#reply-strategy-trigger span').textContent = opt.textContent;
         document.querySelectorAll('#reply-strategy-container .custom-select-option').forEach(o => o.classList.remove('selected'));
         opt.classList.add('selected');
+      }
+      
+      // Load custom prompts
+      window.customPrompts = {
+        contrarian: items.customPromptContrarian || '',
+        expert: items.customPromptExpert || '',
+        minimal: items.customPromptMinimal || ''
+      };
+      
+      const promptEditor = document.getElementById('custom-strategy-prompt');
+      if (promptEditor) {
+        // Sync on input
+        promptEditor.addEventListener('input', (e) => {
+          const val = replyStrategy.value;
+          if (val.includes('杠精')) window.customPrompts.contrarian = e.target.value;
+          else if (val.includes('专业')) window.customPrompts.expert = e.target.value;
+          else if (val.includes('极简')) window.customPrompts.minimal = e.target.value;
+        });
+        promptEditor.addEventListener('blur', saveMemory);
+        
+        // Initial setup
+        const initVal = replyStrategy.value;
+        if (initVal.includes('杠精')) promptEditor.value = window.customPrompts.contrarian;
+        else if (initVal.includes('专业')) promptEditor.value = window.customPrompts.expert;
+        else if (initVal.includes('极简')) promptEditor.value = window.customPrompts.minimal;
       }
     }
     
@@ -202,13 +230,20 @@ function saveMemory() {
   const uiTheme = themeInput ? themeInput.value : 'auto';
 
   if (chrome.storage) {
-    chrome.storage.local.set({
+    let toSave = {
       apiKey: apiKey,
       replyStrategy: target,
       styleTrainingData: styleTrainingData,
       engineLanguage: engineLanguage,
       uiTheme: uiTheme
-    }, () => {
+    };
+    if (window.customPrompts) {
+      toSave.customPromptContrarian = window.customPrompts.contrarian;
+      toSave.customPromptExpert = window.customPrompts.expert;
+      toSave.customPromptMinimal = window.customPrompts.minimal;
+    }
+    
+    chrome.storage.local.set(toSave, () => {
       applyTheme(uiTheme);
       applyLanguage(engineLanguage);
       addLog(t('log_config_updated'), 'system');
@@ -770,6 +805,18 @@ function setupCustomSelects() {
         hiddenInput.value = opt.getAttribute('data-value');
         label.textContent = opt.textContent;
         container.classList.remove('open');
+        
+        // Handle custom prompt switching
+        if (hiddenInput.id === 'reply-strategy' && window.customPrompts) {
+          const promptEditor = document.getElementById('custom-strategy-prompt');
+          if (promptEditor) {
+            const val = hiddenInput.value;
+            if (val.includes('杠精')) promptEditor.value = window.customPrompts.contrarian;
+            else if (val.includes('专业')) promptEditor.value = window.customPrompts.expert;
+            else if (val.includes('极简')) promptEditor.value = window.customPrompts.minimal;
+          }
+        }
+        
         saveMemory(); // Auto-save on dropdown change
         
         // Dispatch change event to save
