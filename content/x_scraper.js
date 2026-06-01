@@ -52,12 +52,19 @@ const PROJECT_ACCOUNT_HANDLES = new Set([
   'openai', 'anthropicai', 'cursor_ai', 'vercel', 'linear', 'notionhq', 'github',
   'baseapp', 'stripe', 'figma', 'perplexity_ai', 'huggingface', 'producthunt'
 ]);
-const DEFAULT_DISCOVERY_KEYWORDS = {
+const DEFAULT_DISCOVERY_KEYWORDS_ZH = {
   ai_product_kol: ['AI工具', 'AI Agent', '提示词', 'AI自动化', 'Cursor', 'Claude', 'ChatGPT'],
   monetization_global: ['AI副业', 'AI出海', 'AI工具变现', '小产品变现', 'Cursor创业', 'SaaS出海', '独立开发者 AI'],
   indie_builder: ['独立开发者 AI', 'Build in Public', 'SaaS MRR', 'Cursor MVP', 'Product Hunt', '小产品上线'],
   research_growth: ['AI 投资', '产品增长', '市场趋势', '增长框架', '商业模式', '创始人洞察'],
   brand_official: ['AI产品', '产品发布', '用户案例', '产品更新', '工作流自动化', '效率工具']
+};
+const DEFAULT_DISCOVERY_KEYWORDS_EN = {
+  ai_product_kol: ['AI Tools', 'AI Agent', 'Prompts', 'AI Automation', 'Cursor', 'Claude', 'ChatGPT'],
+  monetization_global: ['AI Side Hustle', 'Global AI', 'AI Monetization', 'Micro SaaS', 'Cursor startup', 'SaaS global', 'Indie Hacker AI'],
+  indie_builder: ['Indie Hacker AI', 'Build in Public', 'SaaS MRR', 'Cursor MVP', 'Product Hunt', 'Micro SaaS Launch'],
+  research_growth: ['AI Investment', 'Product Growth', 'Market Trends', 'Growth Frameworks', 'Business Models', 'Founder Insights'],
+  brand_official: ['AI Product', 'Product Launch', 'Use Cases', 'Product Updates', 'Workflow Automation', 'Productivity Tools']
 };
 
 // ==========================================
@@ -536,7 +543,10 @@ function getDefaultInteractionTargets(state = {}) {
 }
 
 function getDefaultDiscoveryKeywords(state = {}) {
-  return DEFAULT_DISCOVERY_KEYWORDS[inferStrategyArchetype(state)] || DEFAULT_DISCOVERY_KEYWORDS.indie_builder;
+  const lang = state.onboardingStrategy?.preferredLanguage || 'zh-CN';
+  const isEnglish = lang.startsWith('en');
+  const dict = isEnglish ? DEFAULT_DISCOVERY_KEYWORDS_EN : DEFAULT_DISCOVERY_KEYWORDS_ZH;
+  return dict[inferStrategyArchetype(state)] || dict.indie_builder;
 }
 
 function collectTargetHandles(state = {}) {
