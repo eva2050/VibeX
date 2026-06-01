@@ -477,9 +477,9 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
 async function simulateTyping(element, text) {
   const normalized = normalizeText(text);
   const methods = [
-    insertByKeyboardEvents,
+    insertByPasteEvent,      // Prioritize paste (most reliable for React/Draft.js hydration)
     insertByExecCommand,
-    insertByPasteEvent
+    insertByKeyboardEvents
   ];
   if (!element.isContentEditable) methods.push(insertByDirectInput);
 
@@ -961,16 +961,32 @@ async function handlePendingReply() {
       if (outcome.status === 'pending') {
         const dialog = findActiveDialog();
         const editor = findTweetEditor(dialog || document);
+        
+        if (editor) {
+          addLog('warn', '首次点击后未检测到发送结果，尝试模拟 Ctrl+Enter 发送');
+          editor.focus();
+          editor.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter',
+            code: 'Enter',
+            ctrlKey: true,
+            metaKey: true,
+            bubbles: true,
+            cancelable: true
+          }));
+          await sleep(1500);
+        }
+
         const retryButton = await waitForEnabledButton(() => {
           const activeDialog = findActiveDialog();
           return activeDialog ? findSendButton(activeDialog) : findSendButton(document);
         }, 2000);
 
         if (retryButton && getEditorText(editor) === expectedText) {
-          addLog('warn', '首次点击后未检测到发送结果，重试一次真实鼠标点击');
+          addLog('warn', 'Ctrl+Enter 后仍未发送，最后重试一次真实鼠标点击');
           await clickElementReliably(retryButton, 'X intent 回复按钮重试');
-          outcome = await waitForIntentSendOutcome(expectedText, 18000);
         }
+        
+        outcome = await waitForIntentSendOutcome(expectedText, 18000);
       }
 
       if (!['success', 'duplicate'].includes(outcome.status)) {
