@@ -196,10 +196,10 @@ let restTimeout = null;
 let scrollCountInCycle = 0;
 let xLoginDetectedNotified = false;
 
-function startAutoScroll() {
+function startAutoScroll(options = {}) {
   if (scrollInterval || restTimeout) return;
   chrome.storage.local.get(['isAutoPaused', 'pendingReply', 'pendingPost', 'lastSurfaceNavigationAt'], (result) => {
-    if (result.isAutoPaused) {
+    if (result.isAutoPaused && !options.skipPauseCheck) {
       addLog('info', '自动操作已暂停，不启动自动滚动');
       return;
     }
@@ -256,8 +256,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       isReplying = false;
       twitterCooldownUntil = 0;
       apiCooldownUntil = 0;
-      startAutoScroll();
-      ensureBioExtracted();
+      // Force clear isAutoPaused to prevent race condition
+      chrome.storage.local.set({ isAutoPaused: false }, () => {
+        startAutoScroll({ skipPauseCheck: true });
+        ensureBioExtracted();
+      });
     } else {
       stopAutoScroll();
     }
@@ -413,6 +416,31 @@ function getTweetText(tweetNode) {
   if (textDiv) return textDiv.innerText.trim();
   const altText = tweetNode.querySelector('[data-testid="tweet"] span');
   if (altText) return altText.innerText.trim();
+  return '';
+}
+
+/**
+ * Detect if a tweet has been translated by X's built-in translation feature.
+ * When X translates a tweet, it shows an indicator like "翻译自 英语" or "Translated from English"
+ * near the tweet text. This function extracts the original language name from that indicator.
+ * @param {Element} tweetNode - The tweet article element
+ * @returns {string} The original language name (e.g. "English", "英语", "Japanese") or empty string if not translated
+ */
+function detectOriginalLanguage(tweetNode) {
+  if (!tweetNode) return '';
+  // X renders the translation indicator as a clickable element near the tweet text,
+  // containing text like "翻译自 英语" (Chinese UI) or "Translated from English" (English UI).
+  // We search all text nodes within the tweet for these patterns.
+  const innerText = tweetNode.innerText || '';
+
+  // Chinese UI: "翻译自 英语", "翻译自 日语", "翻译自 法语" etc.
+  const zhMatch = innerText.match(/翻译自\s+(\S+)/);
+  if (zhMatch) return zhMatch[1];
+
+  // English UI: "Translated from English", "Translated from Japanese" etc.
+  const enMatch = innerText.match(/Translated from\s+(\w+)/i);
+  if (enMatch) return enMatch[1];
+
   return '';
 }
 
@@ -1086,7 +1114,9 @@ function scrapeTweets() {
   ], (result) => {
     if (!result.isRunning) return;
     if (result.isAutoPaused) {
-      addLog('info', '自动操作已暂停，跳过推文抓取');
+      // Auto-heal: if isRunning is true but isAutoPaused is stale, clear it
+      addLog('info', '检测到残留暂停标记，正在自动恢复...');
+      chrome.storage.local.set({ isAutoPaused: false });
       return;
     }
     const automationMode = getAutomationMode(result);
@@ -1178,6 +1208,11 @@ function scrapeTweets() {
     isReplying = true;
     chrome.storage.local.set({ isGeneratingReply: true });
 
+    const detectedOrigLang = detectOriginalLanguage(selected.article);
+    if (detectedOrigLang) {
+      addLog('info', `检测到 X 翻译：原始语言为 ${detectedOrigLang}`);
+    }
+
     chrome.runtime.sendMessage({
       action: 'generateReply',
       tweetText: selected.text,
@@ -1186,7 +1221,8 @@ function scrapeTweets() {
       tweetElementId: selected.tweetId,
       tweetStatusHref: selected.tweetStatus.href,
       tweetStatusId: selected.tweetStatus.id,
-      replyOpportunity: selected.opportunity
+      replyOpportunity: selected.opportunity,
+      originalLanguage: detectedOrigLang
     }, (response) => {
       isReplying = false;
       chrome.storage.local.set({ isGeneratingReply: false });
@@ -2916,12 +2952,13 @@ function injectCollectButtons() {
       const url = statusMeta.href ? (statusMeta.href.startsWith('http') ? statusMeta.href : 'https://x.com' + statusMeta.href) : '';
       const time = getTweetCreatedAt(article) || Date.now();
       const id = statusMeta.id || 'collect-' + Date.now();
+      const originalLanguage = detectOriginalLanguage(article);
       
       if (!text) {
         showToast('❌ 无法提取推文文字内容', 'error');
         return null;
       }
-      return { id, author, text, url, time };
+      return { id, author, text, url, time, originalLanguage };
     };
 
     const rewriteBtn = wrapper.querySelector('.rewrite-btn');
