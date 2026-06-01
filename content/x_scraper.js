@@ -374,7 +374,9 @@ function ensureBioExtracted(options = {}) {
         if (checkCount === 1) {
           setProfileProgress('opening_page', '正在打开 Profile 页面...', 35);
           addLog('info', '当前不在 Profile 页面，后台静默打开...');
-          chrome.runtime.sendMessage({ action: 'openProfileTab', url: `https://x.com${profilePath}` });
+          chrome.storage.local.set({ isBotNavigating: true, profileReadRequested: true }, () => {
+            chrome.runtime.sendMessage({ action: 'openProfileTab', url: `https://x.com${profilePath}` });
+          });
           clearInterval(checkInterval);
         }
         if (checkCount > 25) {
