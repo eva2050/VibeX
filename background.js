@@ -686,13 +686,18 @@ async function performTrustedClick(tabId, x, y) {
   await chrome.scripting.executeScript({
     target: { tabId: tabId },
     func: (clientX, clientY) => {
-      const el = document.elementFromPoint(clientX, clientY);
+      let el = document.elementFromPoint(clientX, clientY);
       if (el) {
-        // Dispatch multiple events to better simulate a real click if needed, or just .click()
+        const btn = el.closest('button, [role="button"]');
+        if (btn) el = btn;
+        
         el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX, clientY }));
         el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX, clientY }));
         el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX, clientY }));
         el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX, clientY }));
+        if (typeof el.click === 'function') {
+          el.click();
+        }
       }
     },
     args: [clickX, clickY]
@@ -832,7 +837,13 @@ let strategyPrompt = '';
           else langConstraint = '\n【语言约束】：请自动识别原文语言并使用相同语言重写。';
         } else if (req.promptType === 'draft_reply') {
           // Reply: always match the original tweet's language
-          langConstraint = '\n【语言约束】：请自动识别原推文的语言，并使用与原推文完全相同的语言进行回复。If the tweet is in English, reply in English. 如果推文是中文，就用中文回复。';
+          // If X's translation is active, we know the actual original language
+          const origLang = req.contextData?.originalLanguage || '';
+          if (origLang) {
+            langConstraint = `\n【语言约束】：注意！下面的推文内容已经被 X 平台翻译过，原始语言是「${origLang}」。你必须使用「${origLang}」进行回复，而不是当前显示的翻译语言。If the original language is English, you MUST reply in English.`;
+          } else {
+            langConstraint = '\n【语言约束】：请自动识别原推文的语言，并使用与原推文完全相同的语言进行回复。If the tweet is in English, reply in English. 如果推文是中文，就用中文回复。';
+          }
         } else {
           if (config.engineLanguage === 'zh') langConstraint = '\n【语言约束】：必须使用中文输出。';
           else if (config.engineLanguage === 'en') langConstraint = '\n【语言约束】：You MUST output in English.';
@@ -2095,7 +2106,11 @@ async function generateAIResponse(tweetContent, replyContext = {}) {
       }
       
       let langConstraint = '';
-      if (config.engineLanguage === 'zh') langConstraint = '必须使用中文输出';
+      const origLang = replyContext.originalLanguage || '';
+      if (origLang) {
+        // X's translation is active — we know the real original language
+        langConstraint = `必须使用「${origLang}」进行回复（原推文已被 X 平台翻译，原始语言是 ${origLang}）。If the original language is English, you MUST reply in English.`;
+      } else if (config.engineLanguage === 'zh') langConstraint = '必须使用中文输出';
       else if (config.engineLanguage === 'en') langConstraint = '必须使用英文输出';
       else langConstraint = '必须自动识别并使用原推文相同的语言输出';
       
@@ -2133,6 +2148,8 @@ ${config.promptTemplate
   .replace('{tweet}', tweetContent)
   .replace('{leadTarget}', config.leadTarget || '无引流目标，请正常回复')}
 ${personaContext}
+
+${origLang ? `[CRITICAL LANGUAGE REQUIREMENT]: The original tweet was in ${origLang} but may have been translated by the platform. You MUST generate your final reply text in ${origLang}. DO NOT output the reply in Chinese if the original language was ${origLang}.` : ''}
 
 先生成 3 个候选回复并自评，选最高质量的一条。严格只返回 JSON，不要 Markdown 代码块：
 {
