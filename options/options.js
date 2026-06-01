@@ -1264,7 +1264,7 @@ const i18nDict = {
     vault_copy: 'Copy',
     log_config_updated: 'System config updated.',
     log_auto_capture: 'UI Cursor aligned (standby)',
-    log_account_lock: 'Locking on account',
+    log_account_lock: 'Targeting account',
     log_no_context: 'No context to regenerate',
     log_copy_fail: 'Copy failed',
     log_enter_material: 'Please enter content',
