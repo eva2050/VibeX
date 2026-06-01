@@ -1226,7 +1226,7 @@ const i18nDict = {
     mode_auto_post: 'Auto Post (Original Content)',
     mode_auto_reply: 'Auto Reply (Active Engagement)',
     mode_browse_only: 'Browse & Save Only (Silent Collection)',
-    label_custom_prompt: 'Custom Prompt Settings',
+    label_custom_prompt: 'Custom Prompt',
     strategy_contrarian: 'Contrarian & Sharp',
     strategy_expert: 'Expert & Data-driven',
     strategy_minimal: 'Minimal & Witty',
