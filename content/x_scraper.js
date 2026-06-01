@@ -3343,6 +3343,30 @@ if (document.body) {
   });
 }
 
+// Resilient heartbeat loop: Ensures critical loops run even if DOM is completely static (e.g. empty search pages)
+setInterval(() => {
+  const now = Date.now();
+  
+  // UI injections fallback
+  if (now - lastUIInjectTime > 2000) {
+    ensureWidget();
+    renderWidget();
+    lastUIInjectTime = now;
+  }
+  
+  // Scrape logic fallback (crucial for rotating out of empty pages)
+  if (now - lastScrapeTime > 6000) {
+    scrapeTweets();
+    lastScrapeTime = now;
+  }
+  
+  // Storage sync fallback
+  if (now - lastStorageSyncTime > 4000) {
+    refreshBotStateFromStorage();
+    lastStorageSyncTime = now;
+  }
+}, 2000);
+
 })();
 
 // Native Compose Toolbar Observer for "Regenerate" button
