@@ -39,7 +39,7 @@ const MIN_REPLY_OPPORTUNITY_SCORE = 35;
 const SEARCH_DISCOVERY_MIN_INTERVAL_MS = 90 * 1000;
 const SEARCH_DISCOVERY_ROTATE_INTERVAL_MS = 2 * 60 * 1000;
 const SEARCH_DISCOVERY_LOW_QUALITY_ROTATE_MS = 15 * 1000;
-const SEARCH_DISCOVERY_LOOKBACK_DAYS = 14;
+const SEARCH_DISCOVERY_LOOKBACK_DAYS = 7;
 const SURFACE_NAVIGATION_MIN_INTERVAL_MS = 60 * 1000;
 const DEFAULT_INTERACTION_TARGETS = {
   ai_product_kol: ['zarazhangrui', 'Leobai825', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
@@ -591,8 +591,8 @@ function getSearchThresholds(state = {}) {
   const lang = state.onboardingStrategy?.preferredLanguage || 'zh-CN';
   const isChinese = lang === 'zh-CN' || lang === 'zh-TW';
   return isChinese
-    ? { minFaves: 20, minViews: 1000 }
-    : { minFaves: 50, minViews: 5000 };
+    ? { minFaves: 20, minRetweets: 0, minReplies: 0, minViews: 0 }
+    : { minFaves: 40, minRetweets: 0, minReplies: 0, minViews: 0 };
 }
 
 function getRecentSinceDate(days = SEARCH_DISCOVERY_LOOKBACK_DAYS) {
@@ -607,7 +607,7 @@ function quoteSearchTerm(term = '') {
     return clean;
   }
   if (/[\u3400-\u9fff]/.test(clean)) {
-    return clean;
+    return /\s/.test(clean) ? `(${clean})` : clean;
   }
   return /\s/.test(clean) ? `"${clean}"` : clean;
 }
@@ -627,51 +627,56 @@ function getNegativeSearchOperators(state = {}) {
     memory.coreOpinions
   ].join('\n').toLowerCase();
   if (/web3|crypto|defi|nft|blockchain|token|链上|加密|币圈/.test(signal)) return '';
-  // Keep it minimal — too many negatives cause X to return zero results
-  return '-airdrop -空投';
+  return [
+    '-web3', '-crypto', '-defi', '-nft', '-airdrop', '-token', '-btc', '-eth',
+    '-币圈', '-加密', '-链上', '-空投', '-撸毛', '-钱包', '-合约', '-铭文',
+    '-链游', '-土狗', '-sol', '-solana'
+  ].join(' ');
 }
 
 function buildDiscoverySearchQueries(state = {}) {
   const keywords = collectDiscoveryKeywords(state);
   const defaultLang = getSearchLanguageOperator(state);
-  const { minFaves } = getSearchThresholds(state);
+  const { minFaves, minRetweets, minReplies } = getSearchThresholds(state);
   const since = getRecentSinceDate();
   const negative = getNegativeSearchOperators(state);
-  const baseFilters = `min_faves:${minFaves} -filter:replies since:${since} ${negative}`.trim();
-
-  // Strategy 1: Individual keyword queries (most reliable on X)
-  const topicQueries = keywords.map(keyword => {
-    const term = quoteSearchTerm(keyword);
-    if (!term) return '';
-    if (isAdvancedSearchQuery(term)) {
-      const langPart = /\blang:/i.test(term) ? '' : defaultLang;
-      const sincePart = /\bsince:/i.test(term) ? '' : `since:${since}`;
-      return `${term} ${langPart} -filter:replies ${sincePart} ${negative}`.trim();
-    }
-    const kwLang = getLangFilterForKeyword(keyword, defaultLang);
-    return `${term} ${kwLang} ${baseFilters}`.replace(/\s+/g, ' ').trim();
-  }).filter(Boolean);
-
-  // Strategy 2: Small OR groups (max 2 keywords per group to keep query short)
+  
+  const filters = [`min_faves:${minFaves}`];
+  if (minRetweets > 0) filters.push(`min_retweets:${minRetweets}`);
+  if (minReplies > 0) filters.push(`min_replies:${minReplies}`);
+  filters.push(`-filter:replies -filter:retweets since:${since} ${negative}`);
+  const coreFilters = filters.join(' ').trim();
+  
   const groupedQueries = [];
-  for (let i = 0; i < keywords.length; i += 2) {
-    const group = keywords.slice(i, i + 2);
+  for (let i = 0; i < keywords.length; i += 3) {
+    const group = keywords.slice(i, i + 3);
     const groupTerms = group.map(kw => quoteSearchTerm(kw)).filter(Boolean);
-    if (groupTerms.length < 2) continue;
+    if (groupTerms.length === 0) continue;
+    // Detect best language filter for this group
     const langs = group.map(kw => detectKeywordLanguage(kw));
     const allLatin = langs.every(l => l === 'latin');
     const allCJK = langs.every(l => l === 'cjk');
     const groupLang = allLatin ? 'lang:en' : (allCJK ? defaultLang : '');
-    groupedQueries.push(`${groupTerms.join(' OR ')} ${groupLang} ${baseFilters}`.replace(/\s+/g, ' ').trim());
+    groupedQueries.push(`${groupTerms.join(' OR ')} ${groupLang} ${coreFilters}`.replace(/\s+/g, ' ').trim());
   }
-
-  // Strategy 3: Account-based queries (lightweight — no lang filter needed)
+  const topicQueries = keywords
+    .map(keyword => {
+      const term = quoteSearchTerm(keyword);
+      if (!term) return '';
+      if (isAdvancedSearchQuery(term)) {
+        const langPart = /\blang:/i.test(term) ? '' : defaultLang;
+        const sincePart = /\bsince:/i.test(term) ? '' : `since:${since}`;
+        return `${term} ${langPart} -filter:replies -filter:retweets ${sincePart} ${negative}`.trim();
+      }
+      const kwLang = getLangFilterForKeyword(keyword, defaultLang);
+      return `${term} ${kwLang} ${coreFilters}`.replace(/\s+/g, ' ').trim();
+    })
+    .filter(Boolean);
   const accountQueries = collectTargetHandles(state)
     .filter(handle => !PROJECT_ACCOUNT_HANDLES.has(handle.toLowerCase()))
     .slice(0, 6)
-    .map(handle => `from:${handle} min_faves:${Math.max(5, Math.floor(minFaves / 4))} -filter:replies since:${since}`.trim());
-
-  return [...new Set([...topicQueries, ...groupedQueries, ...accountQueries])].slice(0, 18);
+    .map(handle => `from:${handle} min_faves:${minFaves} min_replies:${minReplies} -filter:replies -filter:retweets since:${since} ${negative}`.trim());
+  return [...new Set([...groupedQueries, ...topicQueries, ...accountQueries])].slice(0, 18);
 }
 
 function isSearchPage() {
