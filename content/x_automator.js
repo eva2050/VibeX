@@ -464,6 +464,56 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       return;
     }
 
+    // Attempt Native Reply Flow First (Much more reliable and less bot-detectable than intent/tweet)
+    if (tweetNode) {
+      const replyIconBtn = tweetNode.querySelector('[data-testid="reply"]');
+      if (replyIconBtn) {
+        addLog('info', `尝试在当前页面原生弹窗回复 @${author}`);
+        simulateRealClick(replyIconBtn);
+        
+        const draftEditor = await waitForElement(findTweetEditor, 4000);
+        if (draftEditor) {
+          await sleep(500); // Wait for modal animation
+          await simulateTyping(draftEditor, replyText);
+          
+          let sendBtn = await waitForEnabledButton(() => {
+            const dialog = findActiveDialog();
+            return dialog ? findSendButton(dialog) : findSendButton(document);
+          }, 6000);
+          
+          if (sendBtn) {
+            addLog('info', '原生弹窗输入完成，准备发送');
+            await clickElementReliably(sendBtn, '原生回复发送按钮');
+            
+            // Try Ctrl+Enter fallback immediately just in case
+            draftEditor.focus();
+            draftEditor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: true, metaKey: true, bubbles: true, cancelable: true }));
+            
+            const outcome = await waitForIntentSendOutcome(normalizeText(replyText), 12000);
+            if (['success', 'duplicate'].includes(outcome.status)) {
+              addLog('success', `成功发送回复给 @${author}`);
+              notifyReplyCompleted(author, originalText, replyText);
+              isAutomatorBusy = false;
+              
+              // Close modal if still open
+              const closeBtn = findCloseDialogButton(findActiveDialog());
+              if (closeBtn) simulateRealClick(closeBtn);
+              return;
+            } else {
+              addLog('warn', `原生回复发送失败: ${outcome.reason}`);
+            }
+          }
+          
+          // Close the modal if we failed so we can fallback
+          const closeBtn = findCloseDialogButton(findActiveDialog());
+          if (closeBtn) simulateRealClick(closeBtn);
+          await sleep(1000);
+        }
+      }
+    }
+
+    // Fallback to Intent Flow if Native Flow failed or tweetNode wasn't found
+    addLog('warn', '原生回复失败，回退到 Intent 页面模式');
     await startIntentReplyFlow({
       statusId,
       replyText,
