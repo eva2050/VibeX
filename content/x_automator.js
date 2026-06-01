@@ -150,8 +150,9 @@ function getEditorText(element) {
   return normalizeText(element?.innerText || element?.textContent || element?.value || '');
 }
 
-function findTweetEditor(scope = document) {
-  const root = scope || document;
+function findTweetEditor(scope) {
+  const activeDialog = scope ? null : document.querySelector('div[role="dialog"]');
+  const root = scope || activeDialog || document;
   const selectors = [
     '[data-testid="tweetTextarea_0"] [contenteditable="true"]',
     '[data-testid="tweetTextarea_0"][contenteditable="true"]',
@@ -454,8 +455,15 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
     if (!result.isRunning) return;
 
     isAutomatorBusy = true;
-    const tweetNode = document.querySelector(`article[data-bot-id="${tweetElementId}"]`);
-    statusId = statusId || getTweetStatusIdFromNode(tweetNode) || getStatusIdFromHref(getTweetStatusHrefFromNode(tweetNode));
+    
+    // Find the original tweet article element on the page
+    let tweetNode = null;
+    if (statusId) {
+      tweetNode = Array.from(document.querySelectorAll('article')).find(article => {
+        return article.querySelector(`a[href*="/status/${statusId}"]`);
+      });
+    }
+
     if (!statusId) {
       const reason = `未读取到 @${author} 推文 status id，已跳过自动回复，避免卡在 X 灰色回复按钮`;
       addLog('warn', reason);
@@ -470,8 +478,11 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       if (replyIconBtn) {
         addLog('info', `尝试在当前页面原生弹窗回复 @${author}`);
         simulateRealClick(replyIconBtn);
+        const draftEditor = await waitForElement(() => {
+          const dialog = findActiveDialog();
+          return dialog ? findTweetEditor(dialog) : null;
+        }, 6000);
         
-        const draftEditor = await waitForElement(findTweetEditor, 4000);
         if (draftEditor) {
           await sleep(500); // Wait for modal animation
           await simulateTyping(draftEditor, replyText);
