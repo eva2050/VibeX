@@ -2514,9 +2514,9 @@ ${bio || '暂无'}
       const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleanJsonStr);
       const persona = {
-        targetUsers: parsed.targetUsers || '',
-        characteristics: parsed.characteristics || '',
-        goals: parsed.goals || ''
+        targetUsers: parsed.targetUsers || '科技、互联网与 AI 领域的活跃网友',
+        characteristics: parsed.characteristics || '幽默、犀利、喜欢参与前沿话题讨论',
+        goals: parsed.goals || '建立有趣的个人品牌，扩大社交圈与影响力'
       };
       const agentMemory = mergeAgentMemory(config.agentMemory, parsed.memory || parsed.agentMemory || {});
       

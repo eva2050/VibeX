@@ -268,10 +268,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 });
 
 // Initial check for auto-scroll
-chrome.storage.local.get(['profileReadRequested', 'isBotNavigating', 'isRunning'], (result) => {
-  if (result.isBotNavigating) {
+chrome.storage.local.get(['profileReadRequested', 'botNavigationTime', 'isRunning'], (result) => {
+  const isBotNavigating = result.botNavigationTime && (Date.now() - result.botNavigationTime < 10000);
+  
+  if (isBotNavigating) {
     // Bot is navigating itself (e.g. rotating keywords), do not pause.
-    chrome.storage.local.set({ isBotNavigating: false });
     if (result.isRunning) {
       startAutoScroll();
       ensureBioExtracted();
@@ -374,7 +375,7 @@ function ensureBioExtracted(options = {}) {
         if (checkCount === 1) {
           setProfileProgress('opening_page', '正在打开 Profile 页面...', 35);
           addLog('info', '当前不在 Profile 页面，后台静默打开...');
-          chrome.storage.local.set({ isBotNavigating: true, profileReadRequested: true }, () => {
+          chrome.storage.local.set({ botNavigationTime: Date.now(), profileReadRequested: true }, () => {
             chrome.runtime.sendMessage({ action: 'openProfileTab', url: `https://x.com${profilePath}` });
           });
           clearInterval(checkInterval);
@@ -685,7 +686,7 @@ function maybeNavigateToDiscoverySearch(state = {}, reason = '当前页面没有
     discoverySearchIndex: (nextIndex + 1) % queries.length,
     currentDiscoveryQuery: query,
     currentDiscoveryReason: reason,
-    isBotNavigating: true
+    botNavigationTime: Date.now()
   });
   addLog('info', `切换到关键词热帖搜索：${query}`);
   window.location.assign(url);
@@ -707,7 +708,7 @@ function maybeNavigateToHomeSurface(state = {}, reason = '当前页面不是发�
     lastSurfaceNavigationAt: now,
     currentDiscoveryQuery: '',
     currentDiscoveryReason: reason,
-    isBotNavigating: true
+    botNavigationTime: Date.now()
   });
   addLog('info', `当前不在推荐/搜索流，先进入推荐页：${reason}`);
   window.location.assign('https://x.com/home');
@@ -1072,9 +1073,9 @@ function scrapeTweets() {
     if (result.twitterCooldownUntil && Date.now() < result.twitterCooldownUntil) return;
     if (result.apiCooldownUntil && Date.now() < result.apiCooldownUntil) return;
     
-    const persona = result.aiPersona;
-    const hasPersona = persona && (persona.targetUsers || persona.characteristics || persona.goals);
-    if (!hasPersona || !result.competitorReport) return;
+    const persona = result.aiPersona || {};
+    const hasPersona = persona.targetUsers || persona.characteristics || persona.goals || result.accountBio;
+    if (!hasPersona) return;
     if (maybeNavigateToHomeSurface(result, '当前页面不是推荐/搜索流')) return;
     
     const articles = document.querySelectorAll('article[data-testid="tweet"]');
