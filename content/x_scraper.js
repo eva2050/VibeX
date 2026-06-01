@@ -543,6 +543,22 @@ function getSearchLanguageOperator(state = {}) {
   return 'lang:zh';
 }
 
+function detectKeywordLanguage(keyword = '') {
+  const clean = keyword.replace(/["'\s]/g, '');
+  const hasCJK = /[\u3400-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/.test(clean);
+  const hasLatin = /[a-zA-Z]{2,}/.test(clean);
+  if (hasCJK && !hasLatin) return 'cjk';
+  if (hasLatin && !hasCJK) return 'latin';
+  return 'mixed';
+}
+
+function getLangFilterForKeyword(keyword, defaultLang) {
+  const kwLang = detectKeywordLanguage(keyword);
+  if (kwLang === 'latin') return 'lang:en';
+  if (kwLang === 'cjk') return defaultLang;
+  return '';  // mixed — don't filter by language
+}
+
 function getSearchThresholds(state = {}) {
   const lang = state.onboardingStrategy?.preferredLanguage || 'zh-CN';
   const isChinese = lang === 'zh-CN' || lang === 'zh-TW';
@@ -592,35 +608,40 @@ function getNegativeSearchOperators(state = {}) {
 
 function buildDiscoverySearchQueries(state = {}) {
   const keywords = collectDiscoveryKeywords(state);
-  const lang = getSearchLanguageOperator(state);
+  const defaultLang = getSearchLanguageOperator(state);
   const { minFaves, minRetweets, minReplies } = getSearchThresholds(state);
   const since = getRecentSinceDate();
   const negative = getNegativeSearchOperators(state);
-  const baseFilters = `${lang} min_faves:${minFaves} min_retweets:${minRetweets} min_replies:${minReplies} -filter:replies -filter:retweets since:${since} ${negative}`.trim();
+  const coreFilters = `min_faves:${minFaves} min_retweets:${minRetweets} min_replies:${minReplies} -filter:replies -filter:retweets since:${since} ${negative}`.trim();
   const groupedQueries = [];
   for (let i = 0; i < keywords.length; i += 3) {
-    const group = keywords.slice(i, i + 3)
-      .map(keyword => quoteSearchTerm(keyword))
-      .filter(Boolean)
-      .join(' OR ');
-    if (group) groupedQueries.push(`${group} ${baseFilters}`);
+    const group = keywords.slice(i, i + 3);
+    const groupTerms = group.map(kw => quoteSearchTerm(kw)).filter(Boolean);
+    if (groupTerms.length === 0) continue;
+    // Detect best language filter for this group
+    const langs = group.map(kw => detectKeywordLanguage(kw));
+    const allLatin = langs.every(l => l === 'latin');
+    const allCJK = langs.every(l => l === 'cjk');
+    const groupLang = allLatin ? 'lang:en' : (allCJK ? defaultLang : '');
+    groupedQueries.push(`${groupTerms.join(' OR ')} ${groupLang} ${coreFilters}`.replace(/\s+/g, ' ').trim());
   }
   const topicQueries = keywords
     .map(keyword => {
       const term = quoteSearchTerm(keyword);
       if (!term) return '';
       if (isAdvancedSearchQuery(term)) {
-        const langPart = /\blang:/i.test(term) ? '' : lang;
+        const langPart = /\blang:/i.test(term) ? '' : defaultLang;
         const sincePart = /\bsince:/i.test(term) ? '' : `since:${since}`;
         return `${term} ${langPart} -filter:replies -filter:retweets ${sincePart} ${negative}`.trim();
       }
-      return `${term} ${baseFilters}`.trim();
+      const kwLang = getLangFilterForKeyword(keyword, defaultLang);
+      return `${term} ${kwLang} ${coreFilters}`.replace(/\s+/g, ' ').trim();
     })
     .filter(Boolean);
   const accountQueries = collectTargetHandles(state)
     .filter(handle => !PROJECT_ACCOUNT_HANDLES.has(handle.toLowerCase()))
     .slice(0, 6)
-    .map(handle => `from:${handle} ${lang} min_faves:${minFaves} min_replies:${minReplies} -filter:replies -filter:retweets since:${since} ${negative}`.trim());
+    .map(handle => `from:${handle} min_faves:${minFaves} min_replies:${minReplies} -filter:replies -filter:retweets since:${since} ${negative}`.trim());
   return [...new Set([...groupedQueries, ...topicQueries, ...accountQueries])].slice(0, 18);
 }
 
@@ -1080,7 +1101,9 @@ function scrapeTweets() {
     
     const articles = document.querySelectorAll('article[data-testid="tweet"]');
     if (articles.length === 0) {
-      maybeNavigateToDiscoverySearch(result, '当前页面没有可读推文');
+      maybeNavigateToDiscoverySearch(result, '当前页面没有可读推文', {
+        force: isSearchPage()  // Empty search = rotate immediately
+      });
       return;
     }
 
