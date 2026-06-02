@@ -326,6 +326,7 @@ async function safeNavigateTo(url, reason = '页面跳转', options = {}) {
     pauseAutomation(`${reason} 前无法自动关闭未保存编辑器，已暂停以避免浏览器离站确认弹窗`);
     return result(false);
   }
+  await new Promise(resolve => chrome.storage.local.set({ botNavigationTime: Date.now() }, resolve));
   window.location.assign(url);
   return result(true, { openedCleanTab: false });
 }
