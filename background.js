@@ -802,6 +802,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     const executeMagicPromptCore = (req, textToProcess, senderTab) => {
       chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal'], (config) => {
+        if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = 'en';
         let promptPrefix = '';
         const currentReplyStrategy = config.replyStrategy || '专业流：专业知识 / 数据';
         
@@ -1731,6 +1732,7 @@ function checkAndSetupAlarm() {
         chrome.storage.local.set({ nextPostTime: `写入 X 定时发布：待处理 ${queue.length} 条` });
         scheduleNativeQueue();
       } else {
+        chrome.alarms.clear("postTweetAlarm");
         chrome.storage.local.set({ nextPostTime: '等待内容队列生成' });
       }
       return;
@@ -2146,6 +2148,7 @@ function handlePostCompleted(source) {
 async function generateAIResponse(tweetContent, replyContext = {}) {
   try {
     const config = await getStorage(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'accountBio', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal']);
+    if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = 'en';
     const errors = getConfigErrors(config);
     if (errors.length > 0) {
       addLog('warn', `配置不完整，无法生成回复：${errors.join('、')}`);
@@ -2882,6 +2885,7 @@ async function generateAutoDrafts() {
     'onboardingStrategy', 'postDeliveryMode', 'postsPerDay', 'postScheduleMode',
     'smartTimeSlots', 'postInterval'
   ], async (config) => {
+    if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = 'en';
     const errors = getConfigErrors(config);
     const isPersonaEmpty = !config.aiPersona || (!config.aiPersona.targetUsers && !config.aiPersona.characteristics && !config.aiPersona.goals);
     if (!config.isRunning || errors.length > 0 || config.isGenerating || isPersonaEmpty) {
