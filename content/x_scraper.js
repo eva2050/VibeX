@@ -1134,7 +1134,7 @@ function scrapeTweets() {
       return;
     }
     const automationMode = getAutomationMode(result);
-    if (automationMode !== 'autoReply') return;
+    if (!shouldSendReply(automationMode)) return;
     
     if (result.twitterCooldownUntil && Date.now() < result.twitterCooldownUntil) return;
     if (result.apiCooldownUntil && Date.now() < result.apiCooldownUntil) return;
