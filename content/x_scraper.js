@@ -1782,12 +1782,10 @@ function getCenterVisibleTweet() {
   }
   
   if (closestArticle) {
-    if (!closestArticle.dataset.confiId) {
-      closestArticle.dataset.confiId = 'tw_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
-    }
-    const id = closestArticle.dataset.confiId;
+    const status = getTweetStatus(closestArticle);
     const author = getTweetAuthor(closestArticle) || "未知用户";
     const text = getTweetText(closestArticle) || "";
+    const id = (status && status.id) ? status.id : String(text).substring(0, 30).trim();
     return { id, author, text };
   }
   return null;
