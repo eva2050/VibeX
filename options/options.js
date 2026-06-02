@@ -358,8 +358,10 @@ function saveMemory() {
 function setupStorageListener() {
   if (typeof chrome === 'undefined' || !chrome.storage) return;
 
-  // Check for pending actions on load (in case side panel was just opened by the button)
-  chrome.storage.local.get(['pendingAutoRewrite', 'pendingAutoReply'], (items) => {
+  chrome.storage.local.get(['pendingAutoRewrite', 'pendingAutoReply', 'logs'], (items) => {
+    if (items.logs) {
+      renderLogs(items.logs);
+    }
     if (items.pendingAutoRewrite) {
       const tweetData = items.pendingAutoRewrite;
       currentContext = { type: 'tweet', data: tweetData };
@@ -379,6 +381,9 @@ function setupStorageListener() {
 
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
+      if (changes.logs) {
+        renderLogs(changes.logs.newValue);
+      }
       if (changes.draftVault) {
         renderLibrary(changes.draftVault.newValue);
       }
@@ -422,9 +427,7 @@ function setupContextListener() {
 function handleNewContext(type, data) {
   currentContext = { type, data };
   
-  if (type === 'tweet') {
-    addLog(t('log_auto_capture'), 'system');
-  } else if (type === 'profile') {
+  if (type === 'profile') {
     addLog(`${t('log_account_lock')}: ${data.author}`, 'system');
   }
 }
@@ -888,16 +891,38 @@ function t(key, fallback) {
   return dict[key] || fallback || key;
 }
 
-function addLog(message, type = 'system') {
+function renderLogs(logsArray) {
   const container = document.getElementById('engine-logs');
+  if (!container || !Array.isArray(logsArray)) return;
+  container.innerHTML = '';
   const lang = getCurrentLang();
-  const time = new Date().toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', { hour12: false });
   
-  const div = document.createElement('div');
-  div.className = `log-entry ${type}`;
-  div.textContent = `[${time}] ${message}`;
-  
-  container.prepend(div); // Add to top
+  // Render newest first
+  for (let i = logsArray.length - 1; i >= 0; i--) {
+    const entry = logsArray[i];
+    const timeStr = new Date(entry.time || Date.now()).toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', { hour12: false });
+    
+    const div = document.createElement('div');
+    div.className = `log-entry ${entry.level || entry.type || 'system'}`;
+    div.textContent = `[${timeStr}] ${entry.message}`;
+    container.appendChild(div);
+  }
+}
+
+function addLog(message, type = 'system') {
+  if (typeof chrome === 'undefined' || !chrome.storage) return;
+  const entry = {
+    time: Date.now(),
+    level: type,
+    message: message,
+    source: 'options'
+  };
+  chrome.storage.local.get(['logs'], (result) => {
+    let logs = result.logs || [];
+    logs.push(entry);
+    if (logs.length > 100) logs = logs.slice(-100);
+    chrome.storage.local.set({ logs });
+  });
 }
 
 // Request immediate sync on load
