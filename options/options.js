@@ -898,6 +898,7 @@ const backendLogDict = [
   { p: /自动操作已暂停，停止自动滚动/, en: 'Automation paused, auto-scroll stopped' },
   { p: /滚动本轮结束，休息 (.*?) 秒.../, en: 'Scroll cycle complete, resting $1s...' },
   { p: /全自动发帖: 按渐进调度计划/, en: 'Auto-Post: Progressive schedule' },
+  { p: /全自动发帖\(高频抖动\): 计划/, en: 'Auto-Post (High-Freq Jitter): Schedule' },
   { p: /收到回复生成请求，调用 AI 接口.../, en: 'Reply request received, calling AI API...' },
   { p: /AI 回复生成完成/, en: 'AI reply generated' },
   { p: /成功收录推文 \(作者: (.*?)\) 到灵感库/, en: 'Successfully saved tweet by $1 to Library' },

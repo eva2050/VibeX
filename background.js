@@ -1727,7 +1727,7 @@ function scheduleNextPost() {
       return;
     }
     const postsToday = (res.lastPostDate === now.toDateString()) ? (res.postsToday || 0) : 0;
-    const postsPerDay = res.postsPerDay || 10;
+    const postsPerDay = res.postsPerDay || 20;
     const mode = res.postScheduleMode || 'smart';
     
     if (postsToday >= postsPerDay) {
@@ -1738,16 +1738,19 @@ function scheduleNextPost() {
 
     if (res.onboardingStrategy?.automationMode === 'autoPost') {
       const pCount = res.sessionPostCount || 0;
-      const startTime = res.automationStartTime || Date.now();
       let delayMs;
-      if (pCount === 0) delayMs = 10 * 60000;
-      else if (pCount === 1) delayMs = 40 * 60000;
-      else if (pCount === 2) delayMs = 100 * 60000;
-      else delayMs = 100 * 60000 + (pCount - 2) * 90 * 60000; // Increment
+      if (pCount === 0) {
+        delayMs = (Math.floor(Math.random() * 4) + 2) * 60000;
+      } else {
+        const baseIntervalMinutes = res.postInterval || 30;
+        const jitterFactor = (Math.random() * 0.6) - 0.3;
+        const actualIntervalMinutes = baseIntervalMinutes * (1 + jitterFactor);
+        delayMs = actualIntervalMinutes * 60000;
+      }
       
-      const targetTimeMs = Math.max(now.getTime() + 60000, startTime + delayMs);
+      const targetTimeMs = now.getTime() + delayMs;
       const targetTime = new Date(targetTimeMs);
-      setAlarmAtDate(targetTime, `全自动发帖：按渐进调度计划 ${targetTime.toLocaleString()} 发推`);
+      setAlarmAtDate(targetTime, `全自动发帖(高频抖动): 计划 ${targetTime.toLocaleString()} 发推`);
       return;
     }
 
@@ -1861,7 +1864,7 @@ function buildSmartSchedulePlan(count, config = {}) {
   if (slots.length === 0) {
     slots.push({ start: 8, end: 10 }, { start: 12, end: 14 }, { start: 19, end: 23 });
   }
-  const postsPerDay = Math.max(1, Number(config.postsPerDay) || 5);
+  const postsPerDay = Math.max(1, Number(config.postsPerDay) || 20);
   const plan = [];
   let dayOffset = 0;
 
@@ -1996,7 +1999,7 @@ async function executeNextPost() {
      return;
   }
   
-  const postsPerDay = result.postsPerDay || 10;
+  const postsPerDay = result.postsPerDay || 20;
   const todayStr = new Date().toDateString();
   const postsToday = result.lastPostDate === todayStr ? (result.postsToday || 0) : 0;
   if (postsToday >= postsPerDay) {
