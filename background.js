@@ -2883,7 +2883,7 @@ async function generateAutoDrafts() {
     'apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'isRunning', 'tweetQueue',
     'isGenerating', 'aiPersona', 'agentMemory', 'accountBio', 'competitorReport',
     'onboardingStrategy', 'postDeliveryMode', 'postsPerDay', 'postScheduleMode',
-    'smartTimeSlots', 'postInterval'
+    'smartTimeSlots', 'postInterval', 'engineLanguage'
   ], async (config) => {
     if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = 'en';
     const errors = getConfigErrors(config);
@@ -2928,6 +2928,11 @@ async function generateAutoDrafts() {
     const uniquenessConstraint = existingTexts ? `\n【防重复极其重要】：当前待发布队列中已经包含了以下推文，你本次生成的 ${draftNeeded} 条候选推文，必须在核心观点、开头句式、故事背景上与它们**完全不同**！绝对不要换汤不换药。\n<当前队列>\n${existingTexts}\n</当前队列>\n` : '';
     const randomSeed = `\n[System Random Batch Seed: ${Date.now()}-${Math.random().toString(36).substring(2)}]`;
     
+    const outputLangInstruction = config.engineLanguage === 'en' ? 'ENGLISH (en)' :
+                                  config.engineLanguage === 'ja' ? 'JAPANESE (ja)' :
+                                  config.engineLanguage === 'es' ? 'SPANISH (es)' :
+                                  config.engineLanguage === 'id' ? 'INDONESIAN (id)' : 'CHINESE (zh)';
+
     const prompt = `你是这个账号的 X 内容操盘手，目标不是“写得完整”，而是写出更像 X 原生内容、能被停留/转发/评论/关注的候选推文。
 你要像赛道里的内容操盘手，而不是公众号编辑、品牌公关或普通 AI 助手。
 
@@ -2991,6 +2996,9 @@ ${randomSeed}
 - identity: 是否强化账号身份标签
 - audienceFit: 是否精准击中目标用户
 - nativeX: 是否像 X 原生表达
+
+CRITICAL OUTPUT REQUIREMENT: 
+You MUST write all generated text in ${outputLangInstruction}! Ignore all Chinese examples in this prompt, they are just for structure. If ${outputLangInstruction} is not CHINESE (zh), YOU MUST NOT OUTPUT A SINGLE CHINESE CHARACTER IN THE "text" FIELD!
 
 严格只返回 JSON 对象，不要额外解释：
 {
