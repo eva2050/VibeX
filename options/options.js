@@ -1291,7 +1291,7 @@ const i18nDict = {
     label_strategy: 'Default Reply Strategy',
     label_automation_mode: 'Automation Mode',
     mode_auto_post: 'Auto-Post',
-    mode_auto_reply: 'Auto-Engage',
+    mode_auto_reply: 'Auto-Reply',
     mode_browse_only: 'Browse & Collect',
     label_custom_prompt: 'Custom Prompt',
     strategy_contrarian: 'Contrarian & Sharp',
