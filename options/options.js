@@ -1182,39 +1182,7 @@ if (window.matchMedia) {
   });
 }
 
-    theme_dark: 'Dark',
-    label_language: 'Language',
-    label_api_provider: 'AI Provider',
-    label_ai_model: 'Model Name',
-    placeholder_input: 'Enter text/link...',
-    placeholder_style: 'Paste a high-engagement tweet...',
-    vault_empty_title: 'Your library is empty',
-    vault_empty_desc: 'Start collecting and rewriting!',
-    vault_delete: 'Delete',
-    vault_copy: 'Copy',
-    log_config_updated: 'Settings saved.',
-    log_auto_capture: 'UI Cursor aligned (standby)',
-    log_account_lock: 'Targeting account',
-    log_no_context: 'No context to regenerate',
-    log_copy_fail: 'Copy failed',
-    log_enter_material: 'Please provide input content.',
-    log_engine_start: 'Automation started. Listening 24/7.',
-    log_engine_stop: 'Automation paused.',
-    log_no_content: 'No content selected.',
-    log_no_apikey: 'Missing API Key',
-    log_url_detect: 'URL detected. Extracting...',
-    log_executing: 'Executing task...',
-    log_task_fail: 'Task failed.',
-    log_task_done: 'Task completed. Length:',
-    log_sim_done: 'Simulation complete.',
-    log_auto_saved: 'Auto-saved to library',
-    log_deleted: 'Removed from library.',
-    log_feedback: 'Style feedback recorded.',
-    toast_saved: '✨ Saved',
-    toast_copied: 'Copied!',
-    hint_click_copy: 'Copy'
-  }
-};
+
 
 function applyLanguage(lang) {
   if (lang === 'auto') {
