@@ -3132,6 +3132,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           });
        }
     }
+    
+    if (changes.engineLanguage && changes.engineLanguage.newValue !== changes.engineLanguage.oldValue) {
+       chrome.storage.local.set({ tweetQueue: [] });
+       addLog('info', '输出语言已切换，清空队列并强制重新生成');
+    }
   }
 });
 
