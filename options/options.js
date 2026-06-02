@@ -617,7 +617,7 @@ function updateEngineBadge(isEnabled) {
   const langInput = document.getElementById('engine-language');
   let lang = langInput ? langInput.value : 'auto';
   if (lang === 'auto') lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
-  const dict = i18nDict[lang] || i18nDict.zh;
+  const dict = window.i18nDict[lang] || window.i18nDict.zh;
   
   if (isEnabled) {
     engineBadge.textContent = dict.status_running || '运行中';
@@ -898,63 +898,16 @@ function getCurrentLang() {
 
 function t(key, fallback) {
   const lang = getCurrentLang();
-  const dict = i18nDict[lang] || i18nDict.zh;
+  const dict = window.i18nDict[lang] || window.i18nDict.zh;
   return dict[key] || fallback || key;
 }
 
-const backendLogDict = [
-  { p: /机器人已停止，跳过 intent 回复/, en: 'Bot stopped, skipping intent reply' },
-  { p: /机器人已停止，跳过发推/, en: 'Bot stopped, skipping tweet post' },
-  { p: /扩展程序已安装\/更新/, en: 'Extension installed/updated' },
-  { p: /本轮计划滚动 (.*?) 次，然后休息/, en: 'Planning to scroll $1 times this cycle, then rest' },
-  { p: /自动操作已暂停，停止自动滚动/, en: 'Automation paused, auto-scroll stopped' },
-  { p: /滚动本轮结束，休息 (.*?) 秒.../, en: 'Scroll cycle complete, resting $1s...' },
-  { p: /全自动发帖: 按渐进调度计划/, en: 'Auto-Post: Progressive schedule' },
-  { p: /全自动发帖\(高频抖动\): 计划/, en: 'Auto-Post (High-Freq Jitter): Schedule' },
-  { p: /收到回复生成请求，调用 AI 接口.../, en: 'Reply request received, calling AI API...' },
-  { p: /AI 回复生成完成/, en: 'AI reply generated' },
-  { p: /成功收录推文 \(作者: (.*?)\) 到灵感库/, en: 'Successfully saved tweet by $1 to Library' },
-  { p: /从灵感库中删除了一条推文/, en: 'Deleted a tweet from Library' },
-  { p: /确认已回复 (.*?)，.*?进入 (.*?) 分钟互动冷却/, en: 'Confirmed reply to $1, entering $2 min cooldown' },
-  { p: /执行发推，当前队列 (.*?) 条，发送成功后剩余 (.*?) 条/, en: 'Posting tweet. Queue: $1 (remaining after send: $2)' },
-  { p: /今日已发 (.*?) 条，暂停发推至次日/, en: 'Daily limit reached ($1). Paused until tomorrow.' },
-  { p: /今日已达发推上限 (.*?)，跳过本次执行/, en: 'Daily post limit reached ($1). Skipping.' },
-  { p: /检测到 X 已登录，自动打开策略中心/, en: 'X login detected, opening Strategy Center' },
-  { p: /成功提取链接内容 \((.*?) 字符\)，进入重写流程.../, en: 'Successfully extracted link ($1 chars). Rewriting...' },
-  { p: /任务提交成功，正在等待 DataHub 解析完成.../, en: 'Task submitted, waiting for DataHub parsing...' },
-  { p: /后台打开 Profile 页面: (.*)/, en: 'Opening Profile page in background: $1' },
-  { p: /Profile 页面读取完成，关闭后台标签页/, en: 'Profile parsed successfully, closing background tab' },
-  { p: /定时器触发，准备执行发推/, en: 'Timer triggered, preparing to post tweet' },
-  { p: /当前为先审后发\/影子模式，跳过自动发推执行/, en: 'Shadow mode active, skipping automated post' },
-  { p: /自动操作已暂停，跳过本次发推执行/, en: 'Automation paused, skipping scheduled post' },
-  { p: /向标签页 (.*?) 发送发推指令/, en: 'Sending post command to tab $1' },
-  { p: /发推: (.*)/, en: 'Tweet: $1' },
-  { p: /定时器触发，准备执行发推/, en: 'Timer triggered, preparing to post tweet' },
-  { p: /已达到单次最大连续工作时长 \(10小时\)，为保护账号安全，机器人已自动停止/, en: '10-hour safeguard triggered. Agent stopped automatically to protect your account.' },
-  { p: /当前为先审后发\/影子模式，跳过自动发推执行/, en: 'Shadow mode active, skipping automated post' },
-  { p: /当前为 X 原生定时发布模式，改为写入 X 定时器/, en: 'X Native Schedule mode active, writing to X scheduler' },
-  { p: /自动操作已暂停，跳过本次发推执行/, en: 'Automation paused, skipping scheduled post' },
-  { p: /今日已达发推上限 (.*?)，跳过本次执行/, en: 'Daily post limit reached ($1). Skipping.' },
-  { p: /执行发推，当前队列 (.*?) 条，发送成功后剩余 (.*?) 条/, en: 'Posting tweet. Queue: $1 (remaining after send: $2)' },
-  { p: /已有待处理发布任务，等待当前 X 定时发布完成/, en: 'Pending task exists, waiting for current X native schedule to complete' },
-  { p: /准备写入 X 原生定时发布：(.*)/, en: 'Preparing to write X native schedule: $1' },
-  { p: /收到手动测试发帖请求/, en: 'Received manual test post request' },
-  { p: /固定间隔模式：计划 (.*?) 发推/, en: 'Fixed Interval Mode: Scheduled to post at $1' },
-  { p: /智能时段配置为空，使用默认时段/, en: 'Smart intervals empty, using default intervals' },
-  { p: /智能分布模式：计划 (.*?) 发推（今日 (.*?)\/(.*?)）/, en: 'Smart Distribution Mode: Scheduled at $1 (Today: $2/$3)' },
-  { p: /自动操作已暂停，跳过发推调度/, en: 'Automation paused, skipping post scheduling' },
-  { p: /正在自然浏览时间线，等待触发下一次点赞\/回复或发帖调度\.\.\./, en: 'Browsing naturally, waiting for next scheduled interaction...' },
-  { p: /收到魔法指令请求: (.*)/, en: 'Received magic command request: $1' },
-  { p: /机器人已启动/, en: 'Agent started' },
-  { p: /机器人已停止/, en: 'Agent stopped' }
-];
-
 function translateBackendLog(msg, lang) {
-  if (lang !== 'en') return msg;
+  if (lang === 'zh' || lang === 'auto' || !lang) return msg;
   let translated = msg;
-  for (const item of backendLogDict) {
+  for (const item of window.backendLogDict || []) {
     if (item.p instanceof RegExp && item.p.test(translated)) {
-      translated = translated.replace(item.p, item.en);
+      translated = translated.replace(item.p, item[lang] || item.en || '$&');
     }
   }
   return translated;
@@ -1229,126 +1182,6 @@ if (window.matchMedia) {
   });
 }
 
-const i18nDict = {
-  zh: {
-    api_warning: '缺少核心组件：请配置 API Key',
-    api_goto: '前往设置 &rarr;',
-    header_workspace: '工作区',
-    desc_workspace: '在此输入灵感、长文、或公众号/小红书/YouTube链接，体验一键爆款仿写。',
-    btn_regenerate: '重新生成',
-    btn_save: '保存',
-    header_library: '素材库',
-    desc_library: '您可以在这里直接编辑修改文案，系统会自动将您的修改作为二次反馈喂给 AI，让 AI 不断进化，越来越懂你的风格。',
-    header_settings: '设置',
-    desc_settings: '系统配置与模型参数。',
-    label_apikey: 'API Key (必填)',
-    label_strategy: '默认回复策略',
-    label_automation_mode: '自动化运行模式',
-    mode_auto_post: '全自动发帖 (原创输出)',
-    mode_auto_reply: '全自动回复 (活跃互动)',
-    mode_browse_only: '仅浏览存素材 (静默收集)',
-    label_custom_prompt: '自定义 Prompt 设定',
-    btn_reset_prompt: '恢复默认',
-    placeholder_custom_prompt: '可以在这里完全重写当前回复流派的底层 Prompt...',
-    label_style: '风格训练语料',
-    btn_add_style: '添加新语料',
-    btn_test_api: '测试连接',
-    btn_save_config: '保存配置',
-    header_engine: '高阶实验',
-    status_stopped: '待机中',
-    status_running: '测试中',
-    desc_engine: '开启后将按动态频率智能执行互动与发文。为保护账号，系统强制启用最长 10 小时挂机的防沉迷安全锁。',
-    stat_posts_today: '今日发推',
-    stat_replies_today: '今日回复',
-    engine_logs: '运行日志',
-    log_ready: '代理已就绪。等待心跳信号...',
-    nav_workspace: '工作区',
-    nav_library: '素材库',
-    nav_settings: '设置',
-    nav_engine: '沙盒',
-    label_theme: '界面主题',
-    theme_auto: '自动检测',
-    theme_light: '白天模式',
-    theme_dark: '黑夜模式',
-    label_language: '语言',
-    label_api_provider: 'AI 服务商',
-    label_ai_model: '模型名称',
-    strategy_contrarian: '杠精流：犀利观点 / 争议',
-    strategy_expert: '专业流：专业知识 / 数据',
-    strategy_minimal: '极简流：精辟吐槽 / 玩梗',
-    strategy_custom: '自定义流：完全自定义',
-    placeholder_input: '输入文本/链接...',
-    placeholder_style: '粘贴一条过往的高赞推文...',
-    vault_empty_title: '储备库空空如也',
-    vault_empty_desc: '快去收集和洗稿吧！',
-    vault_delete: '删除',
-    vault_copy: '复制',
-    log_config_updated: '系统配置已更新。',
-    log_auto_capture: '游标已对齐，当前选定目标 (待命)',
-    log_account_lock: '锁定账号分析',
-    log_no_context: '无上下文可重新生成',
-    log_copy_fail: '复制失败',
-    log_enter_material: '请输入外部素材',
-    log_engine_start: '高频测试沙盒已启动，请留意运行日志。',
-    log_engine_stop: '测试沙盒已关闭。',
-    log_no_content: '请先捕获内容后再执行操作',
-    log_no_apikey: '缺少 API Key，任务终止',
-    log_url_detect: '[执行中] 探测到 URL，启动深度抓取任务...',
-    log_executing: '[执行中] 正在执行任务',
-    log_task_fail: '任务失败。',
-    log_task_done: '任务完成。生成长度',
-    log_sim_done: '模拟任务完成。',
-    log_auto_saved: '已自动无感存入储备库',
-    log_deleted: '已从素材库中删除。',
-    log_feedback: 'AI 进化反馈已记录，模型将在下次生成时进行纠偏。',
-    toast_saved: '✨ 已入库',
-    toast_copied: '已复制',
-    hint_click_copy: '复制'
-  },
-  en: {
-    api_warning: 'API Key Required: Please configure',
-    api_goto: 'Go to Settings &rarr;',
-    header_workspace: 'Workspace',
-    desc_workspace: 'Enter inspiration, articles, or links here for one-click viral rewriting.',
-    btn_regenerate: 'Regenerate',
-    btn_save: 'Save',
-    header_library: 'Library',
-    desc_library: 'Edit your drafts directly here. The system feeds your edits back to the AI, letting it learn your style.',
-    header_settings: 'Settings',
-    desc_settings: 'System configuration and model parameters.',
-    label_apikey: 'API Key (Required)',
-    label_strategy: 'Default Reply Strategy',
-    label_automation_mode: 'Automation Mode',
-    mode_auto_post: 'Auto-Post',
-    mode_auto_reply: 'Auto-Reply',
-    mode_auto_engage: 'Auto-Engage (Full Activity)',
-    mode_browse_only: 'Browse & Collect',
-    label_custom_prompt: 'Custom Prompt',
-    strategy_contrarian: 'Contrarian & Sharp',
-    strategy_expert: 'Expert & Data-driven',
-    strategy_minimal: 'Minimal & Witty',
-    strategy_custom: 'Custom Strategy',
-    btn_reset_prompt: 'Reset',
-    placeholder_custom_prompt: 'You can completely rewrite the underlying prompt for the current strategy here...',
-    label_style: 'Style Training Data',
-    btn_add_style: 'Add Reference',
-    btn_test_api: 'Test Connection',
-    btn_save_config: 'Save Settings',
-    header_engine: 'Sandbox',
-    status_stopped: 'Standby',
-    status_running: 'Active',
-    desc_engine: 'When enabled, the system runs with dynamic pacing. A 10-hour automatic shutdown safeguard is enforced to protect your account.',
-    stat_posts_today: 'Posts',
-    stat_replies_today: 'Replies',
-    engine_logs: 'Run Logs',
-    log_ready: 'Agent ready. Waiting for heartbeat...',
-    nav_workspace: 'Workspace',
-    nav_library: 'Library',
-    nav_settings: 'Settings',
-    nav_engine: 'Sandbox',
-    label_theme: 'UI Theme',
-    theme_auto: 'Auto',
-    theme_light: 'Light',
     theme_dark: 'Dark',
     label_language: 'Language',
     label_api_provider: 'AI Provider',
@@ -1387,7 +1220,7 @@ function applyLanguage(lang) {
   if (lang === 'auto') {
     lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
   }
-  const dict = i18nDict[lang] || i18nDict.en;
+  const dict = window.i18nDict[lang] || window.i18nDict.en;
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const key = el.getAttribute('data-i18n');
     if (dict[key]) {
