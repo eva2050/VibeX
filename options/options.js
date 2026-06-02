@@ -211,11 +211,16 @@ function loadMemory() {
       
       const promptEditor = document.getElementById('custom-strategy-prompt');
       if (promptEditor) {
-        // Sync on input
+        let promptSaveTimeout;
         promptEditor.addEventListener('input', (e) => {
           window.customPrompts.custom = e.target.value;
+          clearTimeout(promptSaveTimeout);
+          promptSaveTimeout = setTimeout(saveMemory, 1000);
         });
-        promptEditor.addEventListener('blur', saveMemory);
+        promptEditor.addEventListener('blur', () => {
+          clearTimeout(promptSaveTimeout);
+          saveMemory();
+        });
         
         // Initial setup
         promptEditor.value = window.customPrompts.custom;

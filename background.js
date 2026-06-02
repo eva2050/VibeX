@@ -2113,7 +2113,7 @@ function handlePostCompleted(source) {
 
 async function generateAIResponse(tweetContent, replyContext = {}) {
   try {
-    const config = await getStorage(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'accountBio', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData']);
+    const config = await getStorage(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'accountBio', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal']);
     const errors = getConfigErrors(config);
     if (errors.length > 0) {
       addLog('warn', `配置不完整，无法生成回复：${errors.join('、')}`);
@@ -2148,7 +2148,21 @@ async function generateAIResponse(tweetContent, replyContext = {}) {
       else if (config.engineLanguage === 'en') langConstraint = '必须使用英文输出';
       else langConstraint = '必须自动识别并使用原推文相同的语言输出';
       
-      const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的目标受众画像】：${config.aiPersona?.targetUsers || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n${formatLeadAsset(config.onboardingStrategy)}\n${formatReplyOpportunity(replyContext.replyOpportunity)}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n${formatGrowthPlaybook(playbook)}${styleConstraint}${feedbackConstraint}\n请严格符合上述人设、受众画像、文风约束、内容模板和互动策略进行回复。\n`;
+      let currentReplyStrategy = config.replyStrategy || '极简流：精辟吐槽 / 玩梗';
+      let strategyInstruction = '';
+      if (currentReplyStrategy.includes('杠精')) {
+        strategyInstruction = '策略：1. 找出原推文逻辑最薄弱的一点进行精准打击；2. 抛出一个极其反直觉的犀利观点；3. 多用反问句引发争议和辩论。要求：一针见血，带点嘲讽感但不做人身攻击，字数控制在40字以内。';
+      } else if (currentReplyStrategy.includes('专业')) {
+        strategyInstruction = '策略：1. 直接基于推文内容进行客观的专业分析，无论赞同还是反对都必须一针见血；2. 【关键】必须要补充一条极其硬核的冷知识、底层逻辑或具体数据来作为支撑。要求：不卑不亢，展现极高的专业素养和信息密度，字数控制在80字以内。';
+      } else if (currentReplyStrategy.includes('极简')) {
+        strategyInstruction = '策略：1. 用一句极其精辟的吐槽、神级比喻或者互联网黑话来总结原推文；2. 绝不要分析，只要情绪价值和幽默感。要求：短平快，字数绝对不能超过15个字。';
+      } else if (currentReplyStrategy.includes('自定义')) {
+        strategyInstruction = '【用户完全自定义策略/System Prompt】：' + (config.customPromptGlobal || '请按照你的判断提供高质量回复。');
+      } else {
+        strategyInstruction = '要求：使用“' + currentReplyStrategy + '”的策略，为这条推文写一条高质量的破冰回复。口语化，不要有AI味。';
+      }
+
+      const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的目标受众画像】：${config.aiPersona?.targetUsers || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n${formatLeadAsset(config.onboardingStrategy)}\n${formatReplyOpportunity(replyContext.replyOpportunity)}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n${formatGrowthPlaybook(playbook)}${styleConstraint}${feedbackConstraint}\n【你必须遵守的回复风格与策略指令】：${strategyInstruction}\n请严格符合上述人设、受众画像、文风约束、内容模板和互动策略进行回复。\n`;
       
       const prompt = `你是一个严格的 X 评论筛选与回复 Agent。
 
