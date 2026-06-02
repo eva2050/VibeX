@@ -1136,7 +1136,7 @@ function scrapeTweets() {
       return;
     }
     const automationMode = getAutomationMode(result);
-    if (automationMode !== 'autoReply' && automationMode !== 'browseOnly') return;
+    if (automationMode !== 'autoReply') return;
     
     if (result.twitterCooldownUntil && Date.now() < result.twitterCooldownUntil) return;
     if (result.apiCooldownUntil && Date.now() < result.apiCooldownUntil) return;
@@ -1221,22 +1221,6 @@ function scrapeTweets() {
     rememberProcessedTweet(selected.tweetId);
 
     addLog('info', `选择互动 @${selected.author}: 机会分 ${selected.opportunity.score}（${selected.opportunity.reasons.join('、')}）`);
-
-    if (automationMode === 'browseOnly') {
-      addLog('info', `【仅浏览模式】命中高赞推文，直接收录至素材库 @${selected.author}`);
-      chrome.runtime.sendMessage({
-        action: 'collectTweet',
-        tweet: {
-          id: selected.tweetId,
-          author: selected.author,
-          text: selected.text,
-          url: selected.tweetStatus.href
-        }
-      }, () => {
-        twitterCooldownUntil = Date.now() + 8000;
-      });
-      return;
-    }
 
     isReplying = true;
     chrome.storage.local.set({ isGeneratingReply: true });

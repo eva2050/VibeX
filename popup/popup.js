@@ -221,9 +221,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getModeLabel(mode = 'autoReply') {
     const labels = {
-      autoPost: '全自动发帖',
-      autoReply: '全自动回复',
-      browseOnly: '仅浏览存素材'
+      autoReply: '自动互动',
+      autoPost: '全自动发推'
     };
     return labels[mode] || labels.autoReply;
   }

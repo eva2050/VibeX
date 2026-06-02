@@ -2742,7 +2742,7 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
     preferredLanguage: pick(parsed.preferredLanguage, ['en', 'ja', 'ko', 'zh-CN', 'zh-TW'], 'zh-CN'),
     targetTimezone: pick(parsed.targetTimezone, ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'Asia/Seoul'], 'Asia/Shanghai'),
     growthGoal: memoryValueToText(parsed.growthGoal) || '首月新增 1000 粉丝',
-    automationMode: pick(parsed.automationMode, ['autoPost', 'autoReply', 'browseOnly'], 'autoReply'),
+    automationMode: pick(parsed.automationMode, ['autoPost', 'autoReply'], 'autoReply'),
     recommendedInteractionTargets: recommendedInteractionTargets.split('\n').filter(Boolean),
     firstTweetText: bestViralCandidate(parsed.firstTweetCandidates, memoryValueToText(parsed.firstTweetText)),
     firstTweetCandidates: Array.isArray(parsed.firstTweetCandidates) ? parsed.firstTweetCandidates : [],
