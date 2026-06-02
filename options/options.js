@@ -529,7 +529,7 @@ function bindActions() {
         chrome.storage.local.set({ draftVault: vault }, () => {
           renderVault(vault);
           const oldHtml = btnSaveLib.innerHTML;
-          btnSaveLib.innerHTML = `<i data-lucide="check" width="16" height="16"></i> 已入库`;
+          btnSaveLib.innerHTML = `<i data-lucide="check" width="16" height="16"></i> ${t('toast_saved').replace('✨ ', '')}`;
           if (window.lucide) window.lucide.createIcons();
           setTimeout(() => { 
             btnSaveLib.innerHTML = oldHtml; 
@@ -846,7 +846,7 @@ function renderVault(vault) {
       }
       
       const oldText = btn.innerHTML;
-      btn.innerHTML = `<i data-lucide="check" width="14" height="14"></i> 已复制`;
+      btn.innerHTML = `<i data-lucide="check" width="14" height="14"></i> ${t('toast_copied')}`;
       if(window.lucide) window.lucide.createIcons();
       setTimeout(() => {
         btn.innerHTML = oldText;
