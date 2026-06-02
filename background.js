@@ -876,8 +876,11 @@ let strategyPrompt = '';
         let langConstraint = '';
         if (req.promptType === 'viral_rewrite') {
           // Rewriting: follow user's language setting
-          if (config.engineLanguage === 'zh') langConstraint = '\n【语言约束】：必须使用中文重写。';
-          else if (config.engineLanguage === 'en') langConstraint = '\n【语言约束】：You MUST rewrite in English.';
+          if (config.engineLanguage === 'en') langConstraint = '\n【语言约束】：You MUST rewrite in English.';
+          else if (config.engineLanguage === 'ja') langConstraint = '\n【语言约束】：You MUST rewrite in Japanese (日本語).';
+          else if (config.engineLanguage === 'es') langConstraint = '\n【语言约束】：You MUST rewrite in Spanish (Español).';
+          else if (config.engineLanguage === 'id') langConstraint = '\n【语言约束】：You MUST rewrite in Indonesian (Bahasa Indonesia).';
+          else if (config.engineLanguage === 'zh') langConstraint = '\n【语言约束】：必须使用中文重写。';
           else langConstraint = '\n【语言约束】：请自动识别原文语言并使用相同语言重写。';
         } else if (req.promptType === 'draft_reply') {
           // Reply: always match the original tweet's language
@@ -889,8 +892,11 @@ let strategyPrompt = '';
             langConstraint = '\n【语言约束】：请自动识别原推文的语言，并使用与原推文完全相同的语言进行回复。If the tweet is in English, reply in English. 如果推文是中文，就用中文回复。';
           }
         } else {
-          if (config.engineLanguage === 'zh') langConstraint = '\n【语言约束】：必须使用中文输出。';
-          else if (config.engineLanguage === 'en') langConstraint = '\n【语言约束】：You MUST output in English.';
+          if (config.engineLanguage === 'en') langConstraint = '\n【语言约束】：You MUST output in English.';
+          else if (config.engineLanguage === 'ja') langConstraint = '\n【语言约束】：You MUST output in Japanese (日本語).';
+          else if (config.engineLanguage === 'es') langConstraint = '\n【语言约束】：You MUST output in Spanish (Español).';
+          else if (config.engineLanguage === 'id') langConstraint = '\n【语言约束】：You MUST output in Indonesian (Bahasa Indonesia).';
+          else if (config.engineLanguage === 'zh') langConstraint = '\n【语言约束】：必须使用中文输出。';
           else langConstraint = '';
         }
         
@@ -2168,8 +2174,11 @@ async function generateAIResponse(tweetContent, replyContext = {}) {
       if (origLang) {
         // X's translation is active — we know the real original language
         langConstraint = `必须使用「${origLang}」进行回复（原推文已被 X 平台翻译，原始语言是 ${origLang}）。If the original language is English, you MUST reply in English.`;
-      } else if (config.engineLanguage === 'zh') langConstraint = '必须使用中文输出';
-      else if (config.engineLanguage === 'en') langConstraint = '必须使用英文输出';
+      } else if (config.engineLanguage === 'en') langConstraint = '必须使用英文输出';
+      else if (config.engineLanguage === 'ja') langConstraint = '必须使用日语输出 (Output in Japanese)';
+      else if (config.engineLanguage === 'es') langConstraint = '必须使用西班牙语输出 (Output in Spanish)';
+      else if (config.engineLanguage === 'id') langConstraint = '必须使用印尼语输出 (Output in Indonesian)';
+      else if (config.engineLanguage === 'zh') langConstraint = '必须使用中文输出';
       else langConstraint = '必须自动识别并使用原推文相同的语言输出';
       
       let currentReplyStrategy = config.replyStrategy || '极简流：精辟吐槽 / 玩梗';
@@ -2903,6 +2912,12 @@ async function generateAutoDrafts() {
     const playbookContext = formatGrowthPlaybook(playbook);
     const reportContext = config.competitorReport ? `\n可用的流量操盘报告如下，必须严格吸收其中的钩子、矩阵和风险边界：\n${config.competitorReport}\n` : "";
     
+    const langConstraint = config.engineLanguage === 'en' ? '【语言约束】：必须使用英文 (English) 撰写内容。' :
+                           config.engineLanguage === 'ja' ? '【语言约束】：必须使用日语 (Japanese) 撰写内容。' :
+                           config.engineLanguage === 'es' ? '【语言约束】：必须使用西班牙语 (Spanish) 撰写内容。' :
+                           config.engineLanguage === 'id' ? '【语言约束】：必须使用印尼语 (Indonesian) 撰写内容。' :
+                           config.engineLanguage === 'zh' ? '【语言约束】：必须使用中文撰写内容。' : '';
+    
     const prompt = `你是这个账号的 X 内容操盘手，目标不是“写得完整”，而是写出更像 X 原生内容、能被停留/转发/评论/关注的候选推文。
 你要像赛道里的内容操盘手，而不是公众号编辑、品牌公关或普通 AI 助手。
 
@@ -2919,6 +2934,7 @@ ${memoryContext}
 ${playbookContext}
 ${formatLeadAsset(config.onboardingStrategy)}
 ${reportContext}
+${langConstraint}
 
 内容质量与排版硬门槛：
 - 【排版与长度多样化】：大部分必须以“短帖”和“中短帖”为主（像一个真实活人的即兴发言），偶尔可以有稍长的结构化干货。拒绝清一色的长篇大论。
