@@ -1270,8 +1270,9 @@ const i18nDict = {
     log_auto_saved: '已自动无感存入储备库',
     log_deleted: '已从素材库中删除。',
     log_feedback: 'AI 进化反馈已记录，模型将在下次生成时进行纠偏。',
-    toast_saved: '✨ 已保存',
-    hint_click_copy: '点击即可复制'
+    toast_saved: '✨ 已入库',
+    toast_copied: '已复制',
+    hint_click_copy: '复制'
   },
   en: {
     api_warning: 'API Key Required: Please configure',
@@ -1345,7 +1346,8 @@ const i18nDict = {
     log_deleted: 'Removed from library.',
     log_feedback: 'Style feedback recorded.',
     toast_saved: '✨ Saved',
-    hint_click_copy: 'Click to copy'
+    toast_copied: 'Copied!',
+    hint_click_copy: 'Copy'
   }
 };
 
