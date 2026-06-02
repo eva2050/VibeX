@@ -1621,7 +1621,8 @@ async function callLLM(prompt, config, requireJson = false, onChunk = null) {
   // Gemini Native API
   if (provider === 'gemini') {
     const bodyObj = {
-      contents: [{ parts: [{ text: prompt }] }]
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.95 }
     };
     if (requireJson) {
       bodyObj.generationConfig = { responseMimeType: "application/json" };
@@ -1667,7 +1668,8 @@ async function callLLM(prompt, config, requireJson = false, onChunk = null) {
   const model = config.aiModel || 'google/gemini-2.5-flash';
   const reqBody = {
     model: model,
-    messages: [{ role: 'user', content: prompt }]
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.95
   };
   
   // JSON hint for supported providers
@@ -2917,6 +2919,10 @@ async function generateAutoDrafts() {
                            config.engineLanguage === 'es' ? '【语言约束】：必须使用西班牙语 (Spanish) 撰写内容。' :
                            config.engineLanguage === 'id' ? '【语言约束】：必须使用印尼语 (Indonesian) 撰写内容。' :
                            config.engineLanguage === 'zh' ? '【语言约束】：必须使用中文撰写内容。' : '';
+                           
+    const existingTexts = queue.map(t => t.text).join('\n---\n');
+    const uniquenessConstraint = existingTexts ? `\n【防重复极其重要】：当前待发布队列中已经包含了以下推文，你本次生成的 ${draftNeeded} 条候选推文，必须在核心观点、开头句式、故事背景上与它们**完全不同**！绝对不要换汤不换药。\n<当前队列>\n${existingTexts}\n</当前队列>\n` : '';
+    const randomSeed = `\n[System Random Batch Seed: ${Date.now()}-${Math.random().toString(36).substring(2)}]`;
     
     const prompt = `你是这个账号的 X 内容操盘手，目标不是“写得完整”，而是写出更像 X 原生内容、能被停留/转发/评论/关注的候选推文。
 你要像赛道里的内容操盘手，而不是公众号编辑、品牌公关或普通 AI 助手。
@@ -2935,6 +2941,8 @@ ${playbookContext}
 ${formatLeadAsset(config.onboardingStrategy)}
 ${reportContext}
 ${langConstraint}
+${uniquenessConstraint}
+${randomSeed}
 
 内容质量与排版硬门槛：
 - 【排版与长度多样化】：大部分必须以“短帖”和“中短帖”为主（像一个真实活人的即兴发言），偶尔可以有稍长的结构化干货。拒绝清一色的长篇大论。
