@@ -540,5 +540,6 @@ window.backendLogDict = [
   { p: /X 原生定时发布创建成功！(.*)/, en: 'X Native Scheduled Post created successfully! $1', ja: 'Xのネイティブ予約投稿が正常に作成されました！$1', es: '¡Publicación programada nativa de X creada con éxito! $1', id: 'Postingan Terjadwal Asli X berhasil dibuat! $1' },
   { p: /定时推文发送成功！(.*)/, en: 'Scheduled tweet sent successfully! $1', ja: '予約ツイートの送信に成功しました！$1', es: '¡Tweet programado enviado con éxito! $1', id: 'Tweet terjadwal berhasil dikirim! $1' },
   { p: /发推按钮/, en: 'Post button', ja: '投稿ボタン', es: 'Botón de publicación', id: 'Tombol posting' },
-  { p: /回复按钮/, en: 'Reply button', ja: '返信ボタン', es: 'Botón de respuesta', id: 'Tombol balas' }
+  { p: /回复按钮/, en: 'Reply button', ja: '返信ボタン', es: 'Botón de respuesta', id: 'Tombol balas' },
+  { p: /扩展已更新，已强制清空发帖队列以应用新规则/, en: 'Extension updated, forced clearing of post queue to apply new rules', ja: '拡張機能が更新されました。新しいルールを適用するために投稿キューを強制的にクリアしました', es: 'Extensión actualizada, se forzó el borrado de la cola de publicaciones para aplicar las nuevas reglas', id: 'Ekstensi diperbarui, memaksa pembersihan antrean pos untuk menerapkan aturan baru' }
 ];

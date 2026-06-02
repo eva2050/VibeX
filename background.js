@@ -729,7 +729,15 @@ chrome.runtime.onInstalled.addListener((details) => {
   if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
   }
-  addLog('info', '扩展程序已安装/更新');
+  
+  if (details.reason === 'update') {
+    // Force clear tweet queue on update to ensure any old language drafts are flushed out
+    chrome.storage.local.set({ tweetQueue: [] });
+    addLog('info', '扩展已更新，已强制清空发帖队列以应用新规则');
+  } else {
+    addLog('info', '扩展程序已安装');
+  }
+
   // 初始化默认配置
   chrome.storage.local.get(['apiKey', 'targetUsers', 'promptTemplate', 'leadTarget', 'isRunning'], (result) => {
     if (!result.hasOwnProperty('isRunning')) {
