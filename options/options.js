@@ -938,6 +938,7 @@ const backendLogDict = [
   { p: /智能时段配置为空，使用默认时段/, en: 'Smart intervals empty, using default intervals' },
   { p: /智能分布模式：计划 (.*?) 发推（今日 (.*?)\/(.*?)）/, en: 'Smart Distribution Mode: Scheduled at $1 (Today: $2/$3)' },
   { p: /自动操作已暂停，跳过发推调度/, en: 'Automation paused, skipping post scheduling' },
+  { p: /正在自然浏览时间线，等待触发下一次点赞\/回复或发帖调度\.\.\./, en: 'Browsing naturally, waiting for next scheduled interaction...' },
   { p: /机器人已启动/, en: 'Agent started' },
   { p: /机器人已停止/, en: 'Agent stopped' }
 ];

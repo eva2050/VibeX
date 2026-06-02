@@ -211,7 +211,7 @@ function startAutoScroll(options = {}) {
       return;
     }
     if (maybeNavigateToHomeSurface(result, '启动时停在个人主页或非发现页')) return;
-    addLog('info', '启动自动滚动时间线');
+    addLog('info', '正在自然浏览时间线，等待触发下一次点赞/回复或发帖调度...');
     beginScrollCycle();
   });
 }
@@ -219,7 +219,6 @@ function startAutoScroll(options = {}) {
 function beginScrollCycle() {
   scrollCountInCycle = 0;
   const scrollsInThisCycle = 3 + Math.floor(Math.random() * 4); // 3~6 次
-  addLog('info', `本轮计划滚动 ${scrollsInThisCycle} 次，然后休息`);
 
   function doOneScroll() {
     scrollCountInCycle++;
@@ -231,7 +230,6 @@ function beginScrollCycle() {
       clearInterval(scrollInterval);
       scrollInterval = null;
       const restSec = 20 + Math.floor(Math.random() * 21); // 20~40 秒休息
-      addLog('info', `滚动本轮结束，休息 ${restSec} 秒...`);
       restTimeout = setTimeout(() => {
         restTimeout = null;
         beginScrollCycle();
