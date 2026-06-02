@@ -1090,7 +1090,7 @@ function getTweetBotId(tweetNode, author, text) {
 }
 
 function getAutomationMode(state = {}) {
-  return state.onboardingStrategy?.automationMode || 'autoReply';
+  return state.onboardingStrategy?.automationMode || 'autoEngage';
 }
 
 function shouldGenerateReplySuggestion(mode) {
@@ -1258,7 +1258,22 @@ function scrapeTweets() {
       const replyText = response ? (response.replyText || response.reply) : '';
       if (replyText) {
         const willSend = shouldSendReply(automationMode);
-        twitterCooldownUntil = Date.now() + (willSend ? REPLY_ATTEMPT_LOCK_MS : REPLY_COOLDOWN_MS);
+        
+        let dynamicCooldownMs = REPLY_COOLDOWN_MS;
+        if (willSend) {
+          dynamicCooldownMs = REPLY_ATTEMPT_LOCK_MS; // wait for automator to finish
+        } else {
+          let minMins = 12;
+          let maxMins = 20;
+          if (automationMode === 'autoEngage') {
+            minMins = 20;
+            maxMins = 30;
+          }
+          const randomMins = Math.floor(Math.random() * (maxMins - minMins + 1)) + minMins;
+          dynamicCooldownMs = randomMins * 60000;
+        }
+        
+        twitterCooldownUntil = Date.now() + dynamicCooldownMs;
         chrome.storage.local.set({
           twitterCooldownUntil,
           lastReplySuggestion: {
@@ -1284,7 +1299,8 @@ function scrapeTweets() {
               tweetAuthor: selected.author,
               tweetContent: selected.text,
               tweetStatusHref: selected.tweetStatus.href,
-              tweetStatusId: selected.tweetStatus.id
+              tweetStatusId: selected.tweetStatus.id,
+              automationMode
             }
           }));
         }

@@ -472,6 +472,11 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       return;
     }
 
+    if (tweetNode) {
+      // Execute Like and RT with dynamic pacing
+      await simulateLikeAndRetweet(tweetNode, e.detail.automationMode);
+    }
+
     // Attempt Native Reply Flow First (Much more reliable and less bot-detectable than intent/tweet)
     if (tweetNode) {
       const replyIconBtn = tweetNode.querySelector('[data-testid="reply"]');
@@ -534,6 +539,51 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
     });
   });
 });
+
+async function simulateLikeAndRetweet(tweetNode, mode) {
+  if (mode !== 'autoEngage' && mode !== 'autoReply') return;
+  
+  const now = Date.now();
+  const res = await new Promise(resolve => chrome.storage.local.get(['lastLikeTime', 'lastRtTime'], resolve));
+  const lastLikeTime = res.lastLikeTime || 0;
+  const lastRtTime = res.lastRtTime || 0;
+  
+  // Like Logic (10-20 per 10h -> 1 every 30-60 mins)
+  const minLikeWait = 30 * 60000;
+  if (now - lastLikeTime > minLikeWait) {
+    // 50% chance if we've passed the minimum wait, to randomize it more up to 60 mins
+    if (Math.random() > 0.5 || now - lastLikeTime > 60 * 60000) {
+      const likeBtn = tweetNode.querySelector('[data-testid="like"]');
+      if (likeBtn) {
+        simulateRealClick(likeBtn);
+        addLog('info', '自动点赞触发');
+        chrome.storage.local.set({ lastLikeTime: now });
+        await sleep(Math.floor(Math.random() * 800) + 500);
+      }
+    }
+  }
+
+  // RT Logic (Max 1 per 10h)
+  if (mode === 'autoEngage') {
+    const minRtWait = 10 * 60 * 60000; // 10 hours
+    if (now - lastRtTime > minRtWait) {
+      const rtBtn = tweetNode.querySelector('[data-testid="retweet"]');
+      if (rtBtn) {
+        simulateRealClick(rtBtn);
+        addLog('info', '自动转推触发');
+        chrome.storage.local.set({ lastRtTime: now });
+        await sleep(Math.floor(Math.random() * 500) + 300);
+        
+        // Wait for dropdown and click confirm
+        const rtConfirm = document.querySelector('[data-testid="retweetConfirm"]');
+        if (rtConfirm) {
+          simulateRealClick(rtConfirm);
+        }
+        await sleep(Math.floor(Math.random() * 800) + 500);
+      }
+    }
+  }
+}
 
 async function simulateTyping(element, text) {
   const normalized = normalizeText(text);

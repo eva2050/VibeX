@@ -1200,14 +1200,26 @@ let strategyPrompt = '';
     const author = request.tweetAuthor || '未知用户';
     const replyText = request.replyText || '';
     
-    chrome.storage.local.get(['stats', 'sessionReplyCount', 'onboardingStrategy'], (res) => {
+    chrome.storage.local.get(['stats', 'sessionReplyCount', 'onboardingStrategy', 'repliesToday', 'lastReplyDate'], (res) => {
       const stats = res.stats || { tweetsProcessed: 0, repliesSent: 0 };
       stats.repliesSent = (stats.repliesSent || 0) + 1;
       
-      let count = (res.sessionReplyCount || 0) + 1;
-      let nextCooldownMs = REPLY_COOLDOWN_MS;
+      const nowString = new Date().toDateString();
+      let repliesToday = res.lastReplyDate === nowString ? (res.repliesToday || 0) : 0;
+      repliesToday += 1;
       
-      if (res.onboardingStrategy?.automationMode === 'autoReply' && count <= 5) {
+      let count = (res.sessionReplyCount || 0) + 1;
+      const mode = res.onboardingStrategy?.automationMode || 'autoEngage';
+      
+      let minMins = 12;
+      let maxMins = 20;
+      if (mode === 'autoEngage') {
+        minMins = 20;
+        maxMins = 30;
+      }
+      let nextCooldownMs = (Math.floor(Math.random() * (maxMins - minMins + 1)) + minMins) * 60000;
+      
+      if (mode === 'autoReply' && count <= 5) {
         if (count === 1) nextCooldownMs = 1 * 60 * 1000;
         else if (count === 2) nextCooldownMs = 3 * 60 * 1000;
         else if (count === 3) nextCooldownMs = 5 * 60 * 1000;
@@ -1220,6 +1232,8 @@ let strategyPrompt = '';
       chrome.storage.local.set({
         stats,
         sessionReplyCount: count,
+        repliesToday,
+        lastReplyDate: nowString,
         twitterCooldownUntil,
         lastReplySent: {
           tweetAuthor: author,
@@ -1324,7 +1338,7 @@ function hasPersona(persona) {
 }
 
 function getAutomationMode(config) {
-  return config.onboardingStrategy?.automationMode || 'autoReply';
+  return config.onboardingStrategy?.automationMode || 'autoEngage';
 }
 
 function canAutoPublish(config = {}) {
@@ -1719,52 +1733,46 @@ function scheduleNextPost() {
   const now = new Date();
   chrome.storage.local.get([
     'postsToday', 'lastPostDate', 'isAutoPaused',
-    'postsPerDay', 'postScheduleMode', 'smartTimeSlots', 'postInterval',
     'onboardingStrategy', 'automationStartTime', 'sessionPostCount'
   ], (res) => {
     if (res.isAutoPaused) {
       addLog('info', '自动操作已暂停，跳过发推调度');
       return;
     }
-    const postsToday = (res.lastPostDate === now.toDateString()) ? (res.postsToday || 0) : 0;
-    const postsPerDay = res.postsPerDay || 20;
-    const mode = res.postScheduleMode || 'smart';
     
-    if (postsToday >= postsPerDay) {
-      addLog('info', `今日已发 ${postsToday}/${postsPerDay} 条，暂停发推至次日`);
-      scheduleForTomorrow(now, res);
+    const mode = res.onboardingStrategy?.automationMode || 'autoEngage';
+    
+    // Auto-Reply mode doesn't post at all
+    if (mode === 'autoReply') {
+      chrome.alarms.clear("postTweetAlarm");
+      chrome.storage.local.set({ nextPostTime: '当前模式仅互动，暂停自动发帖' });
       return;
     }
 
-    if (res.onboardingStrategy?.automationMode === 'autoPost') {
-      const pCount = res.sessionPostCount || 0;
-      let delayMs;
-      if (pCount === 0) {
-        delayMs = (Math.floor(Math.random() * 4) + 2) * 60000;
-      } else {
-        const baseIntervalMinutes = res.postInterval || 30;
-        const jitterFactor = (Math.random() * 0.6) - 0.3;
-        const actualIntervalMinutes = baseIntervalMinutes * (1 + jitterFactor);
-        delayMs = actualIntervalMinutes * 60000;
+    const pCount = res.sessionPostCount || 0;
+    let delayMs;
+    
+    // Immediate First Action
+    if (pCount === 0) {
+      delayMs = (Math.floor(Math.random() * 3) + 1) * 60000; // 1-3 mins
+    } else {
+      // Dynamic intervals based on mode pacing targets (per 10h)
+      // autoEngage: 10-15 per 10h -> 40-60 mins
+      // autoPost: 15-20 per 10h -> 30-40 mins
+      let minMins = 30;
+      let maxMins = 40;
+      if (mode === 'autoEngage') {
+        minMins = 40;
+        maxMins = 60;
       }
       
-      const targetTimeMs = now.getTime() + delayMs;
-      const targetTime = new Date(targetTimeMs);
-      setAlarmAtDate(targetTime, `全自动发帖(高频抖动): 计划 ${targetTime.toLocaleString()} 发推`);
-      return;
-    }
-
-    if (postsToday === 0) {
-      const firstRunTime = new Date(now.getTime() + FIRST_AUTO_POST_DELAY_MS);
-      setAlarmAtDate(firstRunTime, '纯自动发布：启动后快速执行第一条发推');
-      return;
+      const randomMins = Math.floor(Math.random() * (maxMins - minMins + 1)) + minMins;
+      delayMs = randomMins * 60000;
     }
     
-    if (mode === 'interval') {
-      scheduleInterval(now, res);
-    } else {
-      scheduleSmart(now, res, postsToday, postsPerDay);
-    }
+    const targetTimeMs = now.getTime() + delayMs;
+    const targetTime = new Date(targetTimeMs);
+    setAlarmAtDate(targetTime, `全自动发帖: 计划 ${targetTime.toLocaleTimeString()} 发推`);
   });
 }
 
@@ -1967,6 +1975,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "postTweetAlarm") {
     addLog('info', '定时器触发，准备执行发推');
     executeNextPost();
+  } else if (alarm.name === "autoShutdownAlarm") {
+    addLog('warn', '已达到单次最大连续工作时长 (10小时)，为保护账号安全，机器人已自动停止');
+    chrome.storage.local.set({ isRunning: false });
   }
 });
 
@@ -2742,7 +2753,7 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
     preferredLanguage: pick(parsed.preferredLanguage, ['en', 'ja', 'ko', 'zh-CN', 'zh-TW'], 'zh-CN'),
     targetTimezone: pick(parsed.targetTimezone, ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'Asia/Seoul'], 'Asia/Shanghai'),
     growthGoal: memoryValueToText(parsed.growthGoal) || '首月新增 1000 粉丝',
-    automationMode: pick(parsed.automationMode, ['autoPost', 'autoReply'], 'autoReply'),
+    automationMode: pick(parsed.automationMode, ['autoPost', 'autoReply', 'autoEngage'], 'autoEngage'),
     recommendedInteractionTargets: recommendedInteractionTargets.split('\n').filter(Boolean),
     firstTweetText: bestViralCandidate(parsed.firstTweetCandidates, memoryValueToText(parsed.firstTweetText)),
     firstTweetCandidates: Array.isArray(parsed.firstTweetCandidates) ? parsed.firstTweetCandidates : [],
@@ -2995,6 +3006,8 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
              isTyping: false,
              isAutoPaused: false,
              pauseReason: '',
+             sessionPostCount: 0,
+             sessionReplyCount: 0,
              tweetQueue: normalizeDraftQueue(res.tweetQueue)
           });
           const isPersonaEmpty = !res.aiPersona || (!res.aiPersona.targetUsers && !res.aiPersona.characteristics && !res.aiPersona.goals);
@@ -3003,11 +3016,13 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           } else if (!isPersonaEmpty) {
              generateAutoDrafts();
           }
+          chrome.alarms.create("autoShutdownAlarm", { delayInMinutes: 600 });
           checkAndSetupAlarm();
        });
     } else if (changes.isRunning && !changes.isRunning.newValue) {
        addLog('info', '机器人已停止');
        chrome.alarms.clear("postTweetAlarm");
+       chrome.alarms.clear("autoShutdownAlarm");
        chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
     }
     if (changes.isAutoPaused && changes.isAutoPaused.oldValue && !changes.isAutoPaused.newValue) {

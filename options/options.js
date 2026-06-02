@@ -176,7 +176,7 @@ function loadMemory() {
 
     const automationModeInput = document.getElementById('automation-mode');
     if (automationModeInput) {
-      automationModeInput.value = items.onboardingStrategy?.automationMode || 'autoReply';
+      automationModeInput.value = items.onboardingStrategy?.automationMode || 'autoEngage';
       const opt = document.querySelector(`#automation-mode-container .custom-select-option[data-value="${automationModeInput.value}"]`);
       if (opt) {
         document.querySelector('#automation-mode-trigger span').textContent = opt.textContent;
@@ -267,16 +267,16 @@ function loadMemory() {
     renderVault(items.draftVault);
     
     // Update stats
-    chrome.storage.local.get(['stats'], (res) => {
-      if (res.stats) {
-        const statReplies = document.getElementById('stat-replies');
-        const statSaved = document.getElementById('stat-saved');
-        if (statReplies) statReplies.textContent = res.stats.repliesSent || 0;
-        if (statSaved) statSaved.textContent = res.stats.tweetsProcessed || items.draftVault.length || 0;
-      } else {
-        const statSaved = document.getElementById('stat-saved');
-        if (statSaved) statSaved.textContent = items.draftVault.length || 0;
-      }
+    chrome.storage.local.get(['postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (res) => {
+      const statPosts = document.getElementById('stat-posts-today');
+      const statReplies = document.getElementById('stat-replies-today');
+      const nowString = new Date().toDateString();
+      
+      const postsToday = res.lastPostDate === nowString ? (res.postsToday || 0) : 0;
+      const repliesToday = res.lastReplyDate === nowString ? (res.repliesToday || 0) : 0;
+      
+      if (statPosts) statPosts.textContent = postsToday;
+      if (statReplies) statReplies.textContent = repliesToday;
     });
   });
 }
@@ -284,16 +284,22 @@ function loadMemory() {
 // Listen for stats updates from background
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
-    if (changes.stats) {
-      const stats = changes.stats.newValue;
-      const statReplies = document.getElementById('stat-replies');
-      const statSaved = document.getElementById('stat-saved');
-      if (statReplies) statReplies.textContent = stats.repliesSent || 0;
-      if (statSaved) statSaved.textContent = stats.tweetsProcessed || 0;
+    const nowString = new Date().toDateString();
+    if (changes.postsToday || changes.lastPostDate) {
+      const statPosts = document.getElementById('stat-posts-today');
+      if (statPosts) {
+        chrome.storage.local.get(['postsToday', 'lastPostDate'], res => {
+          statPosts.textContent = res.lastPostDate === nowString ? (res.postsToday || 0) : 0;
+        });
+      }
     }
-    if (changes.draftVault) {
-      const statSaved = document.getElementById('stat-saved');
-      if (statSaved) statSaved.textContent = changes.draftVault.newValue.length || 0;
+    if (changes.repliesToday || changes.lastReplyDate) {
+      const statReplies = document.getElementById('stat-replies-today');
+      if (statReplies) {
+        chrome.storage.local.get(['repliesToday', 'lastReplyDate'], res => {
+          statReplies.textContent = res.lastReplyDate === nowString ? (res.repliesToday || 0) : 0;
+        });
+      }
     }
   }
 });
@@ -917,7 +923,23 @@ const backendLogDict = [
   { p: /当前为先审后发\/影子模式，跳过自动发推执行/, en: 'Shadow mode active, skipping automated post' },
   { p: /自动操作已暂停，跳过本次发推执行/, en: 'Automation paused, skipping scheduled post' },
   { p: /向标签页 (.*?) 发送发推指令/, en: 'Sending post command to tab $1' },
-  { p: /发推: (.*)/, en: 'Tweet: $1' }
+  { p: /发推: (.*)/, en: 'Tweet: $1' },
+  { p: /定时器触发，准备执行发推/, en: 'Timer triggered, preparing to post tweet' },
+  { p: /已达到单次最大连续工作时长 \(10小时\)，为保护账号安全，机器人已自动停止/, en: '10-hour safeguard triggered. Agent stopped automatically to protect your account.' },
+  { p: /当前为先审后发\/影子模式，跳过自动发推执行/, en: 'Shadow mode active, skipping automated post' },
+  { p: /当前为 X 原生定时发布模式，改为写入 X 定时器/, en: 'X Native Schedule mode active, writing to X scheduler' },
+  { p: /自动操作已暂停，跳过本次发推执行/, en: 'Automation paused, skipping scheduled post' },
+  { p: /今日已达发推上限 (.*?)，跳过本次执行/, en: 'Daily post limit reached ($1). Skipping.' },
+  { p: /执行发推，当前队列 (.*?) 条，发送成功后剩余 (.*?) 条/, en: 'Posting tweet. Queue: $1 (remaining after send: $2)' },
+  { p: /已有待处理发布任务，等待当前 X 定时发布完成/, en: 'Pending task exists, waiting for current X native schedule to complete' },
+  { p: /准备写入 X 原生定时发布：(.*)/, en: 'Preparing to write X native schedule: $1' },
+  { p: /收到手动测试发帖请求/, en: 'Received manual test post request' },
+  { p: /固定间隔模式：计划 (.*?) 发推/, en: 'Fixed Interval Mode: Scheduled to post at $1' },
+  { p: /智能时段配置为空，使用默认时段/, en: 'Smart intervals empty, using default intervals' },
+  { p: /智能分布模式：计划 (.*?) 发推（今日 (.*?)\/(.*?)）/, en: 'Smart Distribution Mode: Scheduled at $1 (Today: $2/$3)' },
+  { p: /自动操作已暂停，跳过发推调度/, en: 'Automation paused, skipping post scheduling' },
+  { p: /机器人已启动/, en: 'Agent started' },
+  { p: /机器人已停止/, en: 'Agent stopped' }
 ];
 
 function translateBackendLog(msg, lang) {
@@ -1228,9 +1250,9 @@ const i18nDict = {
     header_engine: '高阶实验',
     status_stopped: '待机中',
     status_running: '测试中',
-    desc_engine: '开启高频测试模式后，系统将在后台静默运行一系列交互实验。仅建议高级用户使用。',
-    stat_replies: '互动次数',
-    stat_saved: '扫描雷达',
+    desc_engine: '开启后将按动态频率智能执行互动与发文。为保护账号，系统强制启用最长 10 小时挂机的防沉迷安全锁。',
+    stat_posts_today: '今日发推',
+    stat_replies_today: '今日回复',
     engine_logs: '运行日志',
     log_ready: '代理已就绪。等待心跳信号...',
     nav_workspace: '工作区',
@@ -1292,6 +1314,7 @@ const i18nDict = {
     label_automation_mode: 'Automation Mode',
     mode_auto_post: 'Auto-Post',
     mode_auto_reply: 'Auto-Reply',
+    mode_auto_engage: 'Auto-Engage (Full Activity)',
     mode_browse_only: 'Browse & Collect',
     label_custom_prompt: 'Custom Prompt',
     strategy_contrarian: 'Contrarian & Sharp',
@@ -1307,9 +1330,9 @@ const i18nDict = {
     header_engine: 'Sandbox',
     status_stopped: 'Standby',
     status_running: 'Active',
-    desc_engine: 'When enabled, the system runs silent interaction experiments in the background. Recommended for advanced users only.',
-    stat_replies: 'Interactions',
-    stat_saved: 'Tweets Scanned',
+    desc_engine: 'When enabled, the system runs with dynamic pacing. A 10-hour automatic shutdown safeguard is enforced to protect your account.',
+    stat_posts_today: 'Posts',
+    stat_replies_today: 'Replies',
     engine_logs: 'Run Logs',
     log_ready: 'Agent ready. Waiting for heartbeat...',
     nav_workspace: 'Workspace',

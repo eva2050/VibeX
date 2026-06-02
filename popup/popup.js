@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const stepQueue = document.getElementById('stepQueue');
 
   // Load initial state
-  chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt'], (result) => {
+  chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt', 'postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (result) => {
     updateUI(result.isRunning, result.configErrors);
     updateDashboard(result);
   });
@@ -80,8 +80,13 @@ document.addEventListener('DOMContentLoaded', () => {
     xDraftCountSpan.textContent = formatXDraftStatus(data);
     if (refreshDraftCountBtn) refreshDraftCountBtn.disabled = data.xOfficialDraftStatus === 'reading';
     setText('modeText', `${getModeLabel(data.onboardingStrategy?.automationMode)} · ${getDeliveryModeLabel(data.postDeliveryMode)}`);
-    setText('tweetsProcessed', data.stats?.tweetsProcessed || 0);
-    setText('repliesSent', data.stats?.repliesSent || 0);
+    
+    const nowString = new Date().toDateString();
+    const postsToday = data.lastPostDate === nowString ? (data.postsToday || 0) : 0;
+    const repliesToday = data.lastReplyDate === nowString ? (data.repliesToday || 0) : 0;
+    
+    setText('tweetsProcessed', postsToday);
+    setText('repliesSent', repliesToday);
 
     renderStrategySignal(data);
 
@@ -110,7 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Listen for updates from background
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt'], (result) => {
+    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt', 'postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (result) => {
        updateDashboard(result);
        updateUI(result.isRunning, result.configErrors);
     });
@@ -119,7 +124,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
-      chrome.storage.local.get(['isRunning', 'configErrors', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt'], (result) => {
+      chrome.storage.local.get(['isRunning', 'configErrors', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt', 'postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (result) => {
         updateUI(result.isRunning, result.configErrors);
         updateDashboard(result);
       });
@@ -222,7 +227,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function getModeLabel(mode = 'autoReply') {
     const labels = {
       autoReply: '自动互动',
-      autoPost: '全自动发推'
+      autoPost: '全自动发推',
+      autoEngage: '深度活跃'
     };
     return labels[mode] || labels.autoReply;
   }
