@@ -895,6 +895,7 @@ const backendLogDict = [
   { p: /机器人已停止，跳过 intent 回复/, en: 'Bot stopped, skipping intent reply' },
   { p: /机器人已停止，跳过发推/, en: 'Bot stopped, skipping tweet post' },
   { p: /扩展程序已安装\/更新/, en: 'Extension installed/updated' },
+  { p: /本轮计划滚动 (.*?) 次，然后休息/, en: 'Planning to scroll $1 times this cycle, then rest' },
   { p: /自动操作已暂停，停止自动滚动/, en: 'Automation paused, auto-scroll stopped' },
   { p: /滚动本轮结束，休息 (.*?) 秒.../, en: 'Scroll cycle complete, resting $1s...' },
   { p: /全自动发帖: 按渐进调度计划/, en: 'Auto-Post: Progressive schedule' },
