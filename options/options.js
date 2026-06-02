@@ -891,6 +891,44 @@ function t(key, fallback) {
   return dict[key] || fallback || key;
 }
 
+const backendLogDict = [
+  { p: /机器人已停止，跳过 intent 回复/, en: 'Bot stopped, skipping intent reply' },
+  { p: /机器人已停止，跳过发推/, en: 'Bot stopped, skipping tweet post' },
+  { p: /扩展程序已安装\/更新/, en: 'Extension installed/updated' },
+  { p: /自动操作已暂停，停止自动滚动/, en: 'Automation paused, auto-scroll stopped' },
+  { p: /滚动本轮结束，休息 (.*?) 秒.../, en: 'Scroll cycle complete, resting $1s...' },
+  { p: /全自动发帖: 按渐进调度计划/, en: 'Auto-Post: Progressive schedule' },
+  { p: /收到回复生成请求，调用 AI 接口.../, en: 'Reply request received, calling AI API...' },
+  { p: /AI 回复生成完成/, en: 'AI reply generated' },
+  { p: /成功收录推文 \(作者: (.*?)\) 到灵感库/, en: 'Successfully saved tweet by $1 to Library' },
+  { p: /从灵感库中删除了一条推文/, en: 'Deleted a tweet from Library' },
+  { p: /确认已回复 (.*?)，.*?进入 (.*?) 分钟互动冷却/, en: 'Confirmed reply to $1, entering $2 min cooldown' },
+  { p: /执行发推，当前队列 (.*?) 条，发送成功后剩余 (.*?) 条/, en: 'Posting tweet. Queue: $1 (remaining after send: $2)' },
+  { p: /今日已发 (.*?) 条，暂停发推至次日/, en: 'Daily limit reached ($1). Paused until tomorrow.' },
+  { p: /今日已达发推上限 (.*?)，跳过本次执行/, en: 'Daily post limit reached ($1). Skipping.' },
+  { p: /检测到 X 已登录，自动打开策略中心/, en: 'X login detected, opening Strategy Center' },
+  { p: /成功提取链接内容 \((.*?) 字符\)，进入重写流程.../, en: 'Successfully extracted link ($1 chars). Rewriting...' },
+  { p: /任务提交成功，正在等待 DataHub 解析完成.../, en: 'Task submitted, waiting for DataHub parsing...' },
+  { p: /后台打开 Profile 页面: (.*)/, en: 'Opening Profile page in background: $1' },
+  { p: /Profile 页面读取完成，关闭后台标签页/, en: 'Profile parsed successfully, closing background tab' },
+  { p: /定时器触发，准备执行发推/, en: 'Timer triggered, preparing to post tweet' },
+  { p: /当前为先审后发\/影子模式，跳过自动发推执行/, en: 'Shadow mode active, skipping automated post' },
+  { p: /自动操作已暂停，跳过本次发推执行/, en: 'Automation paused, skipping scheduled post' },
+  { p: /向标签页 (.*?) 发送发推指令/, en: 'Sending post command to tab $1' },
+  { p: /发推: (.*)/, en: 'Tweet: $1' }
+];
+
+function translateBackendLog(msg, lang) {
+  if (lang !== 'en') return msg;
+  let translated = msg;
+  for (const item of backendLogDict) {
+    if (item.p instanceof RegExp && item.p.test(translated)) {
+      translated = translated.replace(item.p, item.en);
+    }
+  }
+  return translated;
+}
+
 function renderLogs(logsArray) {
   const container = document.getElementById('engine-logs');
   if (!container || !Array.isArray(logsArray)) return;
@@ -901,10 +939,11 @@ function renderLogs(logsArray) {
   for (let i = logsArray.length - 1; i >= 0; i--) {
     const entry = logsArray[i];
     const timeStr = new Date(entry.time || Date.now()).toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', { hour12: false });
+    const message = translateBackendLog(entry.message || '', lang);
     
     const div = document.createElement('div');
     div.className = `log-entry ${entry.level || entry.type || 'system'}`;
-    div.textContent = `[${timeStr}] ${entry.message}`;
+    div.textContent = `[${timeStr}] ${message}`;
     container.appendChild(div);
   }
 }
