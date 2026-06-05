@@ -14,7 +14,8 @@
     "activeTab",
     "scripting",
     "alarms",
-    "sidePanel"
+    "sidePanel",
+    "power"
   ],
   "host_permissions": [
     "*://x.com/*",
@@ -23,7 +24,8 @@
     "*://*.twitter.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
 
   "action": {
@@ -52,6 +54,7 @@
         "*://*.twitter.com/*"
       ],
       "js": [
+        "content/logic/evaluator.js",
         "content/x_scraper.js",
         "content/x_automator.js"
       ],

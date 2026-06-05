@@ -80,21 +80,47 @@ function createLogRow(log) {
   const levelClass = log.level || 'info';
   const levelText = LEVEL_LABELS[log.level] || log.level;
   const sourceText = SOURCE_LABELS[log.source] || log.source || '未知';
-  const msg = escapeHtml(formatResultLogMessage(log));
+  const msg = formatResultLogMessage(log);
 
-  tr.innerHTML = `
-    <td><span class="log-time">${time}</span></td>
-    <td><span class="log-level ${levelClass}">${levelText}</span></td>
-    <td><span class="log-source">${sourceText}</span></td>
-    <td><span class="log-message">${msg}</span></td>
-  `;
+  const tdTime = document.createElement('td');
+  const spanTime = document.createElement('span');
+  spanTime.className = 'log-time';
+  spanTime.textContent = time;
+  tdTime.appendChild(spanTime);
+
+  const tdLevel = document.createElement('td');
+  const spanLevel = document.createElement('span');
+  spanLevel.className = `log-level ${levelClass}`;
+  spanLevel.textContent = levelText;
+  tdLevel.appendChild(spanLevel);
+
+  const tdSource = document.createElement('td');
+  const spanSource = document.createElement('span');
+  spanSource.className = 'log-source';
+  spanSource.textContent = sourceText;
+  tdSource.appendChild(spanSource);
+
+  const tdMsg = document.createElement('td');
+  const spanMsg = document.createElement('span');
+  spanMsg.className = 'log-message';
+  spanMsg.textContent = msg;
+  tdMsg.appendChild(spanMsg);
+
+  tr.appendChild(tdTime);
+  tr.appendChild(tdLevel);
+  tr.appendChild(tdSource);
+  tr.appendChild(tdMsg);
+  
   return tr;
 }
 
 function createEmptyRow(message) {
   const tr = document.createElement('tr');
   tr.className = 'empty-row';
-  tr.innerHTML = `<td colspan="4">${message}</td>`;
+  const td = document.createElement('td');
+  td.colSpan = 4;
+  td.textContent = message;
+  tr.appendChild(td);
   return tr;
 }
 
@@ -238,8 +264,4 @@ function formatResultLogMessage(log = {}) {
     .trim();
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+

@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const stepQueue = document.getElementById('stepQueue');
 
   // Load initial state
-  chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt', 'postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (result) => {
+  chrome.storage.local.get(['isRunning', 'stats', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (result) => {
     updateUI(result.isRunning, result.configErrors);
     updateDashboard(result);
   });
@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (newState) {
         const missing = [];
         if (!result.apiKey) missing.push('API Key');
-        if (!result.leadTarget) missing.push('引流目标');
+
         if ((result.apiProvider || 'gemini') !== 'gemini' && !result.aiModel) missing.push('模型名称');
         
         if (missing.length > 0) {
@@ -63,23 +63,8 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.runtime.openOptionsPage();
   });
 
-  refreshDraftCountBtn?.addEventListener('click', () => {
-    refreshDraftCountBtn.disabled = true;
-    xDraftCountSpan.textContent = '读取中...';
-    chrome.runtime.sendMessage({ action: 'refreshXOfficialDraftCount' }, (response) => {
-      refreshDraftCountBtn.disabled = false;
-      if (chrome.runtime.lastError || !response?.success) {
-        xDraftCountSpan.textContent = '读取失败';
-        return;
-      }
-      xDraftCountSpan.textContent = `${response.count} 个`;
-    });
-  });
-
   function updateDashboard(data) {
-    xDraftCountSpan.textContent = formatXDraftStatus(data);
-    if (refreshDraftCountBtn) refreshDraftCountBtn.disabled = data.xOfficialDraftStatus === 'reading';
-    setText('modeText', `${getModeLabel(data.onboardingStrategy?.automationMode)} · ${getDeliveryModeLabel(data.postDeliveryMode)}`);
+    setText('modeText', getModeLabel(data.onboardingStrategy?.automationMode));
     
     const nowString = new Date().toDateString();
     const postsToday = data.lastPostDate === nowString ? (data.postsToday || 0) : 0;
@@ -104,18 +89,17 @@ document.addEventListener('DOMContentLoaded', () => {
        nextPostTimeSpan.textContent = "暂无计划";
     }
 
-    const hasConfig = Boolean(data.apiKey && data.leadTarget);
+    const hasConfig = Boolean(data.apiKey);
     const persona = data.aiPersona || {};
     const hasPersona = Boolean(persona.targetUsers || persona.characteristics || persona.goals);
-    const hasOfficialDraftRead = data.xOfficialDraftStatus === 'success';
     setStepState(stepConfig, hasConfig, data.configErrors && data.configErrors.length > 0);
     setStepState(stepPersona, hasPersona, false);
-    setStepState(stepQueue, hasOfficialDraftRead, data.xOfficialDraftStatus === 'failed');
+    setStepState(stepQueue, true, false); // Always checked as we use local sandbox queue now
   }
 
   // Listen for updates from background
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt', 'postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (result) => {
+    chrome.storage.local.get(['accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'stats', 'postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (result) => {
        updateDashboard(result);
        updateUI(result.isRunning, result.configErrors);
     });
@@ -124,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
-      chrome.storage.local.get(['isRunning', 'configErrors', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt', 'postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (result) => {
+      chrome.storage.local.get(['isRunning', 'configErrors', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'stats', 'postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (result) => {
         updateUI(result.isRunning, result.configErrors);
         updateDashboard(result);
       });
@@ -142,17 +126,29 @@ document.addEventListener('DOMContentLoaded', () => {
       ['爆款风格', summarizeStyle(strategy, persona, memory)]
     ].filter(([, value]) => value);
 
+    strategySignal.textContent = ''; // clear
+
     if (rows.length === 0) {
-      strategySignal.innerHTML = '<div class="signal-empty">请先完成设置页的一键分析，Agent 会在这里显示账号角色、目标用户、内容飞轮和爆款风格。</div>';
+      const div = document.createElement('div');
+      div.className = 'signal-empty';
+      div.textContent = '请先完成设置页的一键分析，Agent 会在这里显示账号角色、目标用户、内容飞轮和爆款风格。';
+      strategySignal.appendChild(div);
       return;
     }
 
-    strategySignal.innerHTML = rows.map(([label, value]) => `
-      <div class="signal-row">
-        <span>${escapeHtml(label)}</span>
-        <strong>${escapeHtml(compactText(value, 86))}</strong>
-      </div>
-    `).join('');
+    const frag = document.createDocumentFragment();
+    rows.forEach(([label, value]) => {
+      const rowDiv = document.createElement('div');
+      rowDiv.className = 'signal-row';
+      const span = document.createElement('span');
+      span.textContent = label;
+      const strong = document.createElement('strong');
+      strong.textContent = compactText(value, 86);
+      rowDiv.appendChild(span);
+      rowDiv.appendChild(strong);
+      frag.appendChild(rowDiv);
+    });
+    strategySignal.appendChild(frag);
   }
 
   function summarizeRole(strategy, memory) {
@@ -188,14 +184,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
   }
 
-  function escapeHtml(text) {
-    return String(text || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
+
 
   function updateUI(isRunning, configErrors) {
     statusText.style.color = '';
@@ -233,22 +222,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return labels[mode] || labels.autoReply;
   }
 
-  function getDeliveryModeLabel(mode = 'localQueue') {
-    const labels = {
-      localQueue: '本地发',
-      xNativeSchedule: 'X 定时'
-    };
-    return labels[mode] || labels.localQueue;
-  }
-
-  function formatXDraftStatus(data = {}) {
-    if (data.xOfficialDraftStatus === 'reading') return '读取中...';
-    if (data.xOfficialDraftStatus === 'failed') return '读取失败';
-    if (data.xOfficialDraftStatus === 'success' && Number.isFinite(Number(data.xOfficialDraftCount))) {
-      return `${Number(data.xOfficialDraftCount)} 个`;
-    }
-    return '未读取';
-  }
 
   // Make logo background transparent dynamically
   const logoImg = document.querySelector('.product-logo');

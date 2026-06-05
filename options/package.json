@@ -1,16 +1,1 @@
-{
-  "name": "options",
-  "version": "1.0.0",
-  "description": "",
-  "main": "options.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "jsdom": "^29.1.1"
-  }
-}
+{"type":"module","dependencies":{"jsdom":"^25.0.0"}}

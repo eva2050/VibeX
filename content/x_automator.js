@@ -5,7 +5,6 @@
 console.log("X Auto Bot: Automator loaded on X.com");
 
 const MAX_LOGS = 50;
-const POST_DELIVERY_MODE_X_SCHEDULE = 'xNativeSchedule';
 let isAutomatorBusy = false;
 let consecutiveFailures = 0;
 
@@ -975,11 +974,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     addLog('info', '收到后台发推指令');
     handlePendingPost();
     sendResponse({ success: true });
-  } else if (request.action === "readXOfficialDraftCount") {
-    readXOfficialDraftCount()
-      .then(count => sendResponse({ success: true, count }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true;
+
   }
 });
 
@@ -1134,9 +1129,8 @@ async function handlePendingPost() {
     return;
   }
   if (!chrome.runtime?.id) return;
-  chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'pendingScheduledAt', 'isRunning'], async (result) => {
+  chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'isRunning'], async (result) => {
     const isManualTest = result.pendingPostSource === 'manualTest';
-    const isNativeSchedule = result.pendingPostSource === POST_DELIVERY_MODE_X_SCHEDULE;
     if (!result.isRunning && !isManualTest) {
       addLog('info', '机器人已停止，跳过发推');
       return;
@@ -1149,7 +1143,7 @@ async function handlePendingPost() {
     const postText = String(result.pendingPost || '').trim();
     const expectedText = normalizeText(postText);
     
-    addLog('info', isManualTest ? '开始执行测试发文...' : (isNativeSchedule ? '开始写入 X 原生定时发布...' : '开始执行定时发文...'));
+    addLog('info', isManualTest ? '开始执行测试发文...' : '开始执行定时发文...');
     chrome.storage.local.set({ isTyping: true });
     try {
       if (!postText) {
@@ -1196,10 +1190,7 @@ async function handlePendingPost() {
         return;
       }
 
-      if (isNativeSchedule) {
-        const scheduled = await applyNativeSchedule(result.pendingScheduledAt);
-        if (!scheduled) return;
-      }
+
 
       const postDialog = draftEditor.closest('div[role="dialog"]') || document.querySelector('div[role="dialog"]');
       let sendBtn = postDialog ? findSendButton(postDialog) : findSendButton(document);
@@ -1229,7 +1220,7 @@ async function handlePendingPost() {
         return;
       }
 
-      await clickElementReliably(sendBtn, isNativeSchedule ? 'X 定时发布确认按钮' : '发推按钮');
+      await clickElementReliably(sendBtn, '发推按钮');
       let outcome = await waitForIntentSendOutcome(expectedText, 10000);
       if (outcome.status === 'pending') {
         const dialog = findActiveDialog();
@@ -1256,7 +1247,7 @@ async function handlePendingPost() {
       consecutiveFailures = 0;
       addLog('success', outcome.status === 'duplicate'
         ? `X 提示这条内容已发布过，已消费当前待发任务：${outcome.reason}`
-        : (isManualTest ? `测试推文发送成功！${outcome.reason}` : (isNativeSchedule ? `X 原生定时发布创建成功！${outcome.reason}` : `定时推文发送成功！${outcome.reason}`)));
+        : (isManualTest ? `测试推文发送成功！${outcome.reason}` : `定时推文发送成功！${outcome.reason}`));
       if (outcome.status === 'duplicate') {
         await closeOpenComposerBeforeNavigation('清理重复发布编辑器');
       }
