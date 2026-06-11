@@ -518,9 +518,6 @@ body {
   z-index: 1000;
 }
 
-.nav-item[data-view="view-settings"] {
-  margin-top: auto;
-}
 
 .nav-item {
   background: transparent;

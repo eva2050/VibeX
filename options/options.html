@@ -291,12 +291,14 @@
         <i data-lucide="bot" class="nav-icon" width="20" height="20"></i>
         <span class="nav-label" data-i18n="nav_engine">Auto</span>
       </button>
-      <button class="nav-item" data-view="view-settings" style="margin-top: auto;" title="设置" data-i18n-title="nav_settings">
-        <i data-lucide="settings" class="nav-icon" width="20" height="20"></i>
-      </button>
-      <button class="nav-item" data-view="view-persona" title="Profile" data-i18n-title="nav_customization">
-        <i data-lucide="user" class="nav-icon" width="20" height="20"></i>
-      </button>
+      <div class="bottom-nav-group" style="margin-top: auto; display: flex; flex-direction: column; width: 100%; gap: 4px;">
+        <button class="nav-item" data-view="view-settings" style="height: 48px;" title="设置" data-i18n-title="nav_settings">
+          <i data-lucide="settings" class="nav-icon" width="20" height="20" style="margin-bottom: 0;"></i>
+        </button>
+        <button class="nav-item" data-view="view-persona" style="height: 48px;" title="Profile" data-i18n-title="nav_customization">
+          <i data-lucide="user" class="nav-icon" width="20" height="20" style="margin-bottom: 0;"></i>
+        </button>
+      </div>
     </nav>
   </div>
 
