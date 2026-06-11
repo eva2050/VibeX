@@ -819,11 +819,11 @@ async function waitForIntentSendOutcome(expectedText, timeout = 18000) {
     if (!editor && !dialog) {
       return { status: 'success', reason: '编辑器已关闭' };
     }
-    if (sawSendingState && editor && editorText !== expectedText) {
-      return { status: 'success', reason: '编辑器内容已从待发文本变化' };
+    if (sawSendingState && editor && editorText.length < 5) {
+      return { status: 'success', reason: '编辑器内容已清空' };
     }
-    if (sawSendingState && !button && (!editor || editorText !== expectedText)) {
-      return { status: 'success', reason: '发送按钮消失且编辑器不再保留原文本' };
+    if (sawSendingState && !button && (!editor || editorText.length < 5)) {
+      return { status: 'success', reason: '发送按钮消失且编辑器已清空' };
     }
 
     await sleep(500);
