@@ -59,8 +59,19 @@ export async function pushToGist(token, gistId) {
     }
     
     if (!updatedAt) {
-      const result = await updateGist(token, id, data);
-      updatedAt = result.updatedAt;
+      try {
+        const result = await updateGist(token, id, data);
+        updatedAt = result.updatedAt;
+      } catch (e) {
+        if (e.message.includes('404')) {
+          const result = await createGist(token, data);
+          id = result.id;
+          updatedAt = result.updatedAt;
+          chrome.storage.local.set({ gistId: id });
+        } else {
+          throw e;
+        }
+      }
     }
     
     await chrome.storage.local.set({ gistLastSyncAt: updatedAt, gistStatus: 'synced', gistLastError: '' });

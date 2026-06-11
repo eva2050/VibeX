@@ -1466,7 +1466,9 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
     const hasSyncKeyChanges = Object.keys(changes).some(k => SYNC_KEYS.includes(k));
-    if (hasSyncKeyChanges && !changes.gistLastSyncAt && !changes.gistStatus && !changes.gistLastError) {
+    const isOnlyStatusChange = Object.keys(changes).every(k => ['gistStatus', 'gistLastSyncAt', 'gistLastError', 'gistId', 'logs'].includes(k));
+    
+    if (hasSyncKeyChanges && !isOnlyStatusChange) {
       chrome.storage.local.get(['gistToken', 'gistId', 'gistAutoSync'], (res) => {
         if (res.gistAutoSync && res.gistToken) {
           clearTimeout(gistSyncTimer);
