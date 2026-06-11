@@ -107,9 +107,7 @@ function getIntentPostUrl(text) {
 }
 
 function getIntentReplyUrl(statusId, text) {
-  // Twitter intent/tweet is broken and often drops in_reply_to, causing standalone tweets.
-  // We now navigate directly to the tweet page to use the native reply flow.
-  return `https://x.com/i/status/${statusId}`;
+  return `https://twitter.com/intent/tweet?in_reply_to=${encodeURIComponent(statusId || '')}&text=${encodeURIComponent(text || '')}`;
 }
 
 function getIntentParam(name) {
@@ -1024,44 +1022,30 @@ async function handlePendingReply() {
         return;
       }
 
-      const isTweetPage = window.location.pathname.includes(`/status/${pending.statusId}`);
-      if (!isTweetPage) {
-        addLog('info', '打开推文原页面以进行原生回复');
-        await safeNavigateTo(`https://x.com/i/status/${pending.statusId}`, '打开推文页面', { openCleanTabOnBlocked: true });
+      const isReplyIntentPage = /\/intent\/(tweet|post)/.test(window.location.pathname)
+        && (window.location.search.includes('in_reply_to') || window.location.search.includes(pending.statusId));
+      if (!isReplyIntentPage) {
+        addLog('info', '打开 X 官方 intent 回复页');
+        await safeNavigateTo(getIntentReplyUrl(pending.statusId, pending.replyText), '打开 X 官方 intent 回复页', { openCleanTabOnBlocked: true });
         return;
       }
 
-      let tweetNode = await waitForElement(() => {
-        return Array.from(document.querySelectorAll('article')).find(article => {
-          return article.querySelector(`a[href*="/status/${pending.statusId}"]`);
-        });
-      }, 8000);
-
-      if (!tweetNode) {
-        pauseAutomation('未找到对应的推文，已暂停回复');
-        return;
-      }
-
-      const replyIconBtn = tweetNode.querySelector('[data-testid="reply"]');
-      if (!replyIconBtn) {
-        pauseAutomation('未找到原生回复图标，已暂停回复');
-        return;
-      }
-
-      addLog('info', `尝试在页面原生弹窗回复`);
-      await clickElementReliably(replyIconBtn, '原生回复图标');
-      const draftEditor = await waitForElement(() => {
-        const dialog = findActiveDialog();
-        return dialog ? findTweetEditor(dialog) : null;
-      }, 6000);
-
-      if (!draftEditor) {
-        pauseAutomation('未找到回复弹窗编辑器，已暂停');
-        return;
-      }
-
-      const replyTextForSend = pending.replyText;
+      const intentText = getIntentParam('text');
+      const replyTextForSend = intentText || pending.replyText;
       const expectedText = normalizeText(replyTextForSend);
+      if (!expectedText) {
+        pauseAutomation('X intent 回复文本为空，已暂停');
+        return;
+      }
+      if (intentText && normalizeText(intentText) !== normalizeText(pending.replyText)) {
+        addLog('warn', '检测到本地待回复缓存与 X intent 文本不一致，已以页面 URL 预填文本为准');
+      }
+
+      const draftEditor = await waitForElement(findTweetEditor, 10000);
+      if (!draftEditor) {
+        pauseAutomation('未找到 X intent 回复编辑器，已暂停');
+        return;
+      }
 
       let actualText = getEditorText(draftEditor);
       if (actualText !== expectedText) {
