@@ -995,8 +995,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 // Run once on load in case the tab was newly opened by background
-setTimeout(handlePendingPost, 3000);
-setTimeout(handlePendingReply, 3500);
+setTimeout(() => {
+  chrome.storage.local.get(['pendingReply', 'pendingPost'], (res) => {
+    // If both exist, use URL to decide priority to prevent auto-posts from hijacking reply pages
+    const hasReplyIntent = window.location.search.includes('in_reply_to') || window.location.search.includes(res.pendingReply?.statusId);
+    if (res.pendingReply && (hasReplyIntent || !res.pendingPost)) {
+      handlePendingReply();
+    } else if (res.pendingPost) {
+      handlePendingPost();
+    }
+  });
+}, 3000);
 
 async function handlePendingReply() {
   if (isAutomatorBusy) {
@@ -1177,8 +1186,8 @@ async function handlePendingPost() {
         return;
       }
 
-      if (!window.location.pathname.includes('/intent/post')) {
-        addLog('info', '使用 X intent/post 预填推文，避免中文输入法污染');
+      if (!window.location.pathname.includes('/intent/post') || window.location.search.includes('in_reply_to')) {
+        addLog('info', '使用 X intent/post 预填推文，避免中文输入法或上下文污染');
         await safeNavigateTo(getIntentPostUrl(postText), '打开 X intent/post 发帖页', { openCleanTabOnBlocked: true });
         return;
       }
