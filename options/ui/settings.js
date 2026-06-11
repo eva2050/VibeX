@@ -1,6 +1,7 @@
 import { applyLanguage, t, getCurrentLang } from './i18n.js';
 import { renderVault, addLog, renderLogs, renderAiMemory } from './logs.js';
 import { executeMagicAction, currentContext, setCurrentContext, lastActionType, showToast, setOriginalAIOutput } from '../options.js';
+import { POST_ORIGIN, POST_STATUS, normalizePostRecord } from '../../core/storageSchema.js';
 
 export function updatePreflightStatus(apiKey) {
   const banner = document.getElementById('api-warning-banner');
@@ -429,12 +430,16 @@ export function bindActions() {
       if (!text) return;
       chrome.storage.local.get({ draftVault: [] }, (res) => {
         const vault = res.draftVault;
-        vault.unshift({
+        vault.unshift(normalizePostRecord({
           id: 'manual-' + Date.now(),
           text: text,
           author: 'Manual Rewrite',
+          authorName: 'Manual Rewrite',
+          source: 'Manual Rewrite',
+          origin: POST_ORIGIN.MANUAL_REWRITE,
+          status: POST_STATUS.DRAFT,
           savedAt: Date.now()
-        });
+        }));
         const trimmedVault = vault.slice(0, 100);
         chrome.storage.local.set({ draftVault: trimmedVault }, () => {
           renderVault(trimmedVault);

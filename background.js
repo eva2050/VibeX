@@ -5,6 +5,8 @@ import { getStorage, setStorage, addLog, getConfigErrors, getAIConnectionErrors,
 import { callLLM } from './services/llm.js';
 import { performTrustedClick } from './services/twitter.js';
 import { generateSingleTweetDraft, normalizeAgentMemory, mergeAgentMemory } from './core/automation.js';
+import { buildGenerationContext } from './core/generationContext.js';
+import { POST_ORIGIN, POST_STATUS, normalizePostRecord } from './core/storageSchema.js';
 import { REPLY_RETRY_LOCK_MS, DEFAULT_AGENT_MEMORY, AGENT_MEMORY_LABELS, GROWTH_PLAYBOOKS, DEFAULT_INTERACTION_TARGETS, PROJECT_ACCOUNT_HANDLES, DEFAULT_DISCOVERY_KEYWORDS, selectGrowthPlaybook } from './core/constants.js';
 import { setupMessageRouter } from "./handlers/messageRouter.js";
 import { pullFromGist, pushToGist } from './core/syncLogic.js';
@@ -691,8 +693,50 @@ function triggerPostInTab() {
   });
 }
 
+function upsertAutoPostToVault({ id, text, source, publishedAt }) {
+  const normalizedText = formatTweetForX(text || '');
+  if (!normalizedText) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ draftVault: [] }, (res) => {
+      const vault = Array.isArray(res.draftVault) ? res.draftVault.slice(0, 100) : [];
+      const stableId = id ? String(id) : `auto-${publishedAt || Date.now()}`;
+      const existingIndex = vault.findIndex((item) => {
+        if (item?.id && String(item.id) === stableId) return true;
+        return item?.source === 'auto_generated' && formatTweetForX(item.text || '') === normalizedText;
+      });
+      const existing = existingIndex >= 0 ? vault[existingIndex] : null;
+      const nextItem = normalizePostRecord({
+        ...(existing || {}),
+        id: stableId,
+        text: normalizedText,
+        originalAIOutput: existing?.originalAIOutput || normalizedText,
+        source: POST_ORIGIN.AUTO_GENERATED,
+        origin: POST_ORIGIN.AUTO_GENERATED,
+        author: existing?.author || 'Auto Agent',
+        authorName: existing?.authorName || 'Auto Agent',
+        postSource: source || 'instant_gen',
+        status: POST_STATUS.PUBLISHED,
+        savedAt: existing?.savedAt || publishedAt || Date.now(),
+        publishedAt: publishedAt || Date.now()
+      });
+
+      if (existingIndex >= 0) {
+        vault[existingIndex] = nextItem;
+      } else {
+        vault.unshift(nextItem);
+      }
+
+      chrome.storage.local.set({ draftVault: vault.slice(0, 100) }, () => {
+        addLog('success', '自动发布内容已写入 Posts，可回填表现用于 Loop 学习');
+        resolve(true);
+      });
+    });
+  });
+}
+
 function handlePostCompleted(source) {
-  chrome.storage.local.get(['postsToday', 'lastPostDate', 'sessionPostCount'], (result) => {
+  chrome.storage.local.get(['postsToday', 'lastPostDate', 'sessionPostCount', 'pendingPost', 'pendingPostId', 'pendingPostSource'], (result) => {
     const updates = {
       pendingPost: null,
       pendingPostId: null,
@@ -702,13 +746,30 @@ function handlePostCompleted(source) {
       pauseReason: ''
     };
 
-    const finalize = () => {
-      chrome.storage.local.set(updates, () => {
+    const finalize = (afterPersist) => {
+      const complete = () => {
+        if (afterPersist) {
+          afterPersist().finally(() => {
+            chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
+            checkAndSetupAlarm();
+            chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
+          });
+          return;
+        }
         chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
         checkAndSetupAlarm();
         chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
-      });
+      };
+      chrome.storage.local.set(updates, complete);
     };
+
+    const persistAutoPost = () => upsertAutoPostToVault({
+      id: result.pendingPostId,
+      text: result.pendingPost,
+      source: result.pendingPostSource || source,
+      publishedAt: Date.now()
+    });
+    const shouldPersistAutoPost = source === 'instant_gen' || result.pendingPostSource === 'instant_gen';
 
     if (source === 'queue' || source === 'instant_gen') {
       const now = new Date();
@@ -719,7 +780,7 @@ function handlePostCompleted(source) {
       updates.lastPostDate = todayStr;
       updates.sessionPostCount = (result.sessionPostCount || 0) + 1;
       addLog('success', `推文发布成功，今日已发 ${updates.postsToday} 条`);
-      finalize();
+      finalize(shouldPersistAutoPost ? persistAutoPost : null);
 
     } else {
       addLog('success', '测试推文发送成功');
@@ -730,7 +791,12 @@ function handlePostCompleted(source) {
 
 async function generateAIResponse(tweetContent, replyContext = {}) {
   try {
-    const config = await getStorage(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal', 'aiPersona', 'accountBio', 'leadTarget']);
+    const config = await getStorage([
+      'apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'styleTrainingData',
+      'engineLanguage', 'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes',
+      'replyStrategy', 'customPromptGlobal', 'aiPersona', 'accountBio', 'leadTarget',
+      'agentMemory', 'aiMemory', 'onboardingStrategy', 'competitorReport'
+    ]);
     if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = navigator.language.startsWith('zh') ? 'zh' : 'en';
     const errors = getConfigErrors(config);
     if (errors.length > 0) {
@@ -738,24 +804,11 @@ async function generateAIResponse(tweetContent, replyContext = {}) {
       throw new Error(errors.join('；'));
     }
     
-    const playbook = selectGrowthPlaybook({
-        onboardingStrategy: config.onboardingStrategy,
-        
-        agentMemory: config.agentMemory,
-        accountBio: config.accountBio,
-        leadTarget: config.leadTarget
-      });
+    const generationContext = buildGenerationContext(config, { promptType: 'draft_reply' });
       
-      let styleConstraint = '';
-      if (config.styleTrainingData) {
-        styleConstraint = `\n【严格文风约束】：必须100%模仿以下参考素材的断句节奏、用词习惯（如特定语气词、emoji）、情绪饱和度以及排版结构。请提取并在输出中重现这种独特的个人风格，杜绝任何AI感。\n<文风参考>\n${config.styleTrainingData}\n</文风参考>\n\n`;
-      }
-      
-      let feedbackConstraint = '';
-      if (config.feedbackLoopData && config.feedbackLoopData.length > 0) {
-        const feedbackExamples = config.feedbackLoopData.map((fb, idx) => `[示例 ${idx+1}]\n- 你的原输出 (错误示范): ${fb.original}\n- 用户的修改版 (正确示范): ${fb.modified}`).join('\n\n');
-        feedbackConstraint = `\n【自我进化避坑指南】：请学习用户对你以往回复的修改思路，严禁重犯之前的AI味错误！\n<避坑案例>\n${feedbackExamples}\n</避坑案例>\n`;
-      }
+      const styleConstraint = generationContext.stylePrompt;
+      const feedbackConstraint = generationContext.editFeedbackPrompt;
+      const preferenceConstraint = generationContext.preferencePrompt;
       
       let langConstraint = '';
       const baseLangConstraint = () => {
@@ -789,7 +842,29 @@ async function generateAIResponse(tweetContent, replyContext = {}) {
         strategyInstruction = '要求：使用“' + currentReplyStrategy + '”的策略，为这条推文写一条高质量的破冰回复。口语化，不要有AI味。';
       }
 
-      const personaContext = ``;
+      const personaContext = `
+【账号生成上下文】
+账号简介：
+${generationContext.accountBio}
+
+账号画像：
+- 目标用户：${generationContext.persona?.targetUsers || '未填写'}
+- 人设与语气：${generationContext.persona?.characteristics || '未填写'}
+- 发推策略：${generationContext.persona?.goals || '未填写'}
+
+长期记忆：
+${generationContext.agentMemoryPrompt}
+
+增长模板：
+${generationContext.playbookPrompt || '暂无'}
+
+发布表现记忆：
+${generationContext.performanceMemoryPrompt}
+
+${styleConstraint}
+${feedbackConstraint}
+${preferenceConstraint}
+`;
       
       const prompt = `你是一个严格的 X 评论筛选与回复 Agent。
 

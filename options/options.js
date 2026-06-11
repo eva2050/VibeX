@@ -1,6 +1,7 @@
 import { getCurrentLang, t, translateBackendLog, applyLanguage } from './ui/i18n.js';
 import { renderLogs, addLog, renderVault, renderAiMemory } from './ui/logs.js';
 import { loadMemory, saveMemory, bindActions, updatePreflightStatus, updateEngineBadge, addStyleItem, setupCustomSelects, applyTheme, updateApiStatusIndicator, resetCustomPrompt, updateGistStatusUI } from './ui/settings.js';
+import { POST_ORIGIN, POST_STATUS, normalizePostRecord } from '../core/storageSchema.js';
 
 /**
  * VibeX - Main Controller
@@ -389,12 +390,15 @@ function saveToVault(generatedText, originalOutput = '') {
 
   chrome.storage.local.get({ draftVault: [] }, (items) => {
     const vault = items.draftVault;
-    vault.unshift({
+    vault.unshift(normalizePostRecord({
+      id: 'manual-' + Date.now(),
       text: generatedText,
       originalAIOutput: originalOutput || generatedText,
       source: currentContext?.data?.text || '未知来源',
+      origin: POST_ORIGIN.MANUAL_REWRITE,
+      status: POST_STATUS.DRAFT,
       savedAt: Date.now()
-    });
+    }));
     const trimmedVault = vault.slice(0, 100);
     chrome.storage.local.set({ draftVault: trimmedVault }, () => {
       addLog(`✨ ${t('log_auto_saved')}`, 'system');
@@ -466,7 +470,6 @@ if (window.matchMedia) {
     }
   });
 }
-
 
 
 

@@ -1,19 +1,17 @@
 import { normalizeDraftQueue, queueNeedsNormalization } from '../utils/queueUtils.js';
 import { normalizeGeneratedTweets, totalViralScore, evaluateGeneratedTweets } from '../utils/scoreUtils.js';
+import { memoryValueToText } from '../utils/textUtils.js';
 import { addLog, getConfigErrors, canAutoPublish } from './state.js';
 import { callLLM } from '../services/llm.js';
-import { DEFAULT_AGENT_MEMORY, selectGrowthPlaybook } from './constants.js';
-
-function normalizeAgentMemory(memory = {}) {
-  return { ...DEFAULT_AGENT_MEMORY, ...(memory || {}) };
-}
+import { DEFAULT_AGENT_MEMORY } from './constants.js';
+import { buildGenerationContext, normalizeAgentMemory } from './generationContext.js';
 
 
 
 function mergeAgentMemory(base = {}, incoming = {}) {
   const merged = normalizeAgentMemory(base);
   Object.keys(DEFAULT_AGENT_MEMORY).forEach((key) => {
-    const value = (incoming?.[key]).trim();
+    const value = memoryValueToText(incoming?.[key]).trim();
     if (value) {
       merged[key] = value;
     }
@@ -61,7 +59,7 @@ async function generateSingleTweetDraft() {
     chrome.storage.local.get([
       'apiKey', 'apiProvider', 'aiModel', 'isRunning',
       'isGenerating', 'engineLanguage', 'accountBio', 'agentMemory', 'competitorReport', 'onboardingStrategy', 'leadTarget',
-      'aiPersona', 'styleTrainingData'
+      'aiPersona', 'styleTrainingData', 'aiMemory', 'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes'
     ], async (config) => {
       if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = 'zh';
       const errors = getConfigErrors(config);
@@ -75,23 +73,14 @@ async function generateSingleTweetDraft() {
       addLog('info', `正在即时生成推文...`);
       chrome.runtime.sendMessage({ action: "generationStatus", status: true }).catch(() => {});
       
-      const persona = config.aiPersona || {};
-      const memoryContext = "";
-    const playbook = selectGrowthPlaybook({
-      onboardingStrategy: config.onboardingStrategy,
-      persona,
-      agentMemory: config.agentMemory,
-      accountBio: config.accountBio,
-      leadTarget: config.leadTarget
-    });
-    const playbookContext = "";
-    const reportContext = config.competitorReport ? `\n可用的流量操盘报告如下，必须严格吸收其中的钩子、矩阵和风险边界：\n${config.competitorReport}\n` : "";
+      const generationContext = buildGenerationContext(config, { promptType: 'auto_post' });
+      const persona = generationContext.persona || {};
+      const memoryContext = generationContext.agentMemoryPrompt;
+      const performanceMemoryContext = generationContext.performanceMemoryPrompt;
+    const playbookContext = generationContext.playbookPrompt;
+    const reportContext = generationContext.competitorReportPrompt;
 
-    let styleConstraint = '';
-    if (config.styleTrainingData && config.styleTrainingData.length > 0) {
-      const styleExamples = Array.isArray(config.styleTrainingData) ? config.styleTrainingData.join('\n---\n') : config.styleTrainingData;
-      styleConstraint = `\n【严格文风约束】：必须100%模仿以下参考素材的断句节奏、用词习惯（如特定语气词、emoji）、情绪饱和度以及排版结构。请提取并在输出中重现这种独特的个人风格，杜绝任何AI感。\n<文风参考>\n${styleExamples}\n</文风参考>\n\n`;
-    }
+    let styleConstraint = generationContext.stylePrompt;
     
     const langConstraint = config.engineLanguage === 'en' ? '【语言约束】：必须使用英文 (English) 撰写内容。' :
                            config.engineLanguage === 'ja' ? '【语言约束】：必须使用日语 (Japanese) 撰写内容。' :
@@ -122,7 +111,12 @@ ${styleConstraint}
 ${memoryContext}
 ${playbookContext}
 
+发布表现记忆（Loop），必须用于修正选题、Hook、结构和预测直觉：
+${performanceMemoryContext}
+
 ${reportContext}
+${generationContext.editFeedbackPrompt}
+${generationContext.preferencePrompt}
 ${langConstraint}
 ${uniquenessConstraint}
 ${randomSeed}

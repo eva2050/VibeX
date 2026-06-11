@@ -1,5 +1,6 @@
 import { callLLM } from '../services/llm.js';
 import { addLog } from '../core/state.js';
+import { buildGenerationContext } from '../core/generationContext.js';
 
 export function handleLLMMessage(request, sender, sendResponse, context) {
   if (request.action === "testApiConnection") {
@@ -45,12 +46,18 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
     return true;
   } else if (request.action === "magicPrompt" || request.action === "extractAndRewrite") {
     const executeMagicPromptCore = (req, textToProcess, senderTab) => {
-      chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal', 'aiPersona', 'aiMemory'], (config) => {
+      chrome.storage.local.get([
+        'apiKey', 'apiProvider', 'aiModel', 'styleTrainingData', 'engineLanguage',
+        'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes', 'replyStrategy',
+        'customPromptGlobal', 'aiPersona', 'aiMemory', 'agentMemory',
+        'accountBio', 'leadTarget', 'onboardingStrategy', 'competitorReport'
+      ], (config) => {
         if (!config.apiKey || config.apiKey.trim() === '' || config.apiKey.startsWith('mock-')) {
           sendResponse({ success: false, error: 'ERR_MISSING_API_KEY' });
           return;
         }
         if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = navigator.language.startsWith('zh') ? 'zh' : 'en';
+        const generationContext = buildGenerationContext(config, { promptType: req.promptType });
         let promptPrefix = '';
         const currentReplyStrategy = config.replyStrategy || '专业流：专业知识 / 数据';
         
@@ -126,31 +133,15 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
             promptPrefix = '请处理以下内容：\n';
         }
         
-        let styleConstraint = '';
-        if (config.styleTrainingData && req.promptType === 'viral_rewrite') {
-          styleConstraint = `\n\n【严格文风约束】：必须100%模仿以下参考素材的断句节奏、用词习惯（如特定语气词、emoji）、情绪饱和度以及排版结构。请提取并在输出中重现这种独特的个人风格，杜绝任何AI感。如果原素材是极简口语，你就极简口语；如果是长篇干货，你就长篇干货。\n<文风参考>\n${Array.isArray(config.styleTrainingData) ? config.styleTrainingData.map((s,i) => `[语料 ${i+1}]\n${s}`).join('\n\n') : config.styleTrainingData}\n</文风参考>\n\n`;
-        }
+        let styleConstraint = ['viral_rewrite', 'draft_reply'].includes(req.promptType) ? generationContext.stylePrompt : '';
         
-        let feedbackConstraint = '';
-        if (config.feedbackLoopData && config.feedbackLoopData.length > 0 && (req.promptType === 'viral_rewrite' || req.promptType === 'draft_reply')) {
-          const feedbackExamples = config.feedbackLoopData.map((fb, idx) => `[示例 ${idx+1}]\n- 你的原输出 (AI味重): ${fb.original}\n- 用户的修改版 (理想状态): ${fb.modified}`).join('\n\n');
-          feedbackConstraint = `\n【自我进化避坑指南】：在过去的交互中，用户对你生成的某些内容进行了大量人工修改。请务必学习以下“错误 vs 修正”的对比案例，在这次生成中**坚决避免**使用类似原输出中那种“AI味、翻译腔”的句式！\n<避坑案例>\n${feedbackExamples}\n</避坑案例>\n\n`;
-        }
+        let feedbackConstraint = generationContext.editFeedbackPrompt;
 
-        let preferenceConstraint = '';
-        if (config.feedbackLikes && config.feedbackLikes.length > 0 && (req.promptType === 'viral_rewrite' || req.promptType === 'draft_reply')) {
-          const likes = config.feedbackLikes.map((fb, idx) => `[正面案例 ${idx+1}]\n${fb.text}`).join('\n\n');
-          preferenceConstraint += `\n【正面偏好】：用户非常喜欢以下输出的风格和口吻，请在未来的生成中尽可能模仿这些案例的调性：\n<正面案例>\n${likes}\n</正面案例>\n`;
-        }
-        if (config.feedbackDislikes && config.feedbackDislikes.length > 0 && (req.promptType === 'viral_rewrite' || req.promptType === 'draft_reply')) {
-          const dislikes = config.feedbackDislikes.map((fb, idx) => `[反面案例 ${idx+1}]\n${fb.text}`).join('\n\n');
-          preferenceConstraint += `\n【反面偏好】：用户非常讨厌以下输出的风格，在这次生成中**坚决避免**使用这种语气、句式或套路：\n<反面案例>\n${dislikes}\n</反面案例>\n`;
-        }
+        let preferenceConstraint = generationContext.preferencePrompt;
 
         let performanceMemoryConstraint = '';
-        const learnedRules = Array.isArray(config.aiMemory?.learnedRules) ? config.aiMemory.learnedRules : [];
-        if (learnedRules.length > 0 && req.promptType === 'viral_rewrite') {
-          performanceMemoryConstraint = `\n【发布表现记忆】：以下规则来自用户过往 X post 的预测浏览量与实际浏览量偏差，请在这次重写时优先遵守，用它们修正选题、hook 和表达方式：\n${learnedRules.slice(0, 5).map((rule, idx) => `${idx + 1}. ${rule.text || rule}`).join('\n')}\n`;
+        if (req.promptType === 'viral_rewrite') {
+          performanceMemoryConstraint = `\n【发布表现记忆】：以下规则来自用户过往 X post 的预测浏览量与实际浏览量偏差，请在这次重写时优先遵守，用它们修正选题、hook 和表达方式：\n${generationContext.performanceMemoryPrompt}\n`;
         }
         
         let langConstraint = '';

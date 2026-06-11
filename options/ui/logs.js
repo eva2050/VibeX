@@ -1,5 +1,6 @@
 import { getCurrentLang, translateBackendLog, t } from './i18n.js';
 import { showToast, recordFeedbackLoop } from '../options.js';
+import { POST_STATUS, normalizePostRecord } from '../../core/storageSchema.js';
 
 export function renderLogs(logsArray) {
   const container = document.getElementById('engine-logs');
@@ -179,22 +180,110 @@ function buildLearning(item, deviation) {
   return 'Raise future estimates for concise posts that outperform without heavy structure.';
 }
 
+function getPostFingerprint(text = '') {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+function buildLearningEvent(post, deviation) {
+  if (!post?.aiLearning || !deviation || deviation.status === 'hit') return null;
+  return {
+    id: `${post.id || post.savedAt || Date.now()}-${post.reviewedAt || Date.now()}`,
+    text: post.aiLearning,
+    sourcePostId: post.id || String(post.savedAt || Date.now()),
+    postText: getPostFingerprint(post.text),
+    prediction: post.prediction || null,
+    actualViews: Number(post.actualViews) || 0,
+    deviationRatio: post.deviationRatio,
+    performanceStatus: post.performanceStatus || deviation.status,
+    reviewedAt: post.reviewedAt || Date.now(),
+    createdAt: Date.now()
+  };
+}
+
+function compactLearningEventsIntoRules(events = [], existingRules = []) {
+  const existingByText = new Map(
+    (Array.isArray(existingRules) ? existingRules : [])
+      .filter(rule => rule?.text)
+      .map(rule => [rule.text, rule])
+  );
+  const grouped = new Map();
+
+  (Array.isArray(events) ? events : []).forEach((event) => {
+    const text = String(event?.text || '').trim();
+    if (!text) return;
+    const existingRule = existingByText.get(text);
+    const current = grouped.get(text) || {
+      text,
+      sampleCount: 0,
+      positiveCount: 0,
+      negativeCount: 0,
+      maxAbsDeviation: 0,
+      lastDeviationRatio: 0,
+      sourcePostIds: [],
+      examples: [],
+      createdAt: existingRule?.createdAt || event.createdAt || Date.now()
+    };
+
+    const ratio = Number(event.deviationRatio) || 0;
+    current.sampleCount += 1;
+    if (event.performanceStatus === 'underestimated') current.positiveCount += 1;
+    if (event.performanceStatus === 'overestimated') current.negativeCount += 1;
+    current.maxAbsDeviation = Math.max(current.maxAbsDeviation || 0, Math.abs(ratio));
+    current.lastDeviationRatio = ratio;
+    current.updatedAt = Math.max(Number(current.updatedAt) || 0, Number(event.reviewedAt || event.createdAt) || Date.now());
+    if (event.sourcePostId && !current.sourcePostIds.includes(event.sourcePostId)) {
+      current.sourcePostIds.push(event.sourcePostId);
+    }
+    if (event.postText && !current.examples.includes(event.postText)) {
+      current.examples.push(event.postText);
+    }
+    grouped.set(text, current);
+  });
+
+  existingByText.forEach((rule, text) => {
+    if (!grouped.has(text)) grouped.set(text, rule);
+  });
+
+  return Array.from(grouped.values())
+    .map(rule => ({
+      ...rule,
+      sourcePostIds: Array.isArray(rule.sourcePostIds) ? rule.sourcePostIds.slice(0, 8) : [],
+      examples: Array.isArray(rule.examples) ? rule.examples.slice(0, 3) : [],
+      confidence: Math.min(95, Math.round(35 + (Number(rule.sampleCount) || 1) * 12 + (Number(rule.maxAbsDeviation) || 0) * 20))
+    }))
+    .sort((a, b) => {
+      const confidenceDiff = (Number(b.confidence) || 0) - (Number(a.confidence) || 0);
+      if (confidenceDiff !== 0) return confidenceDiff;
+      return (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0);
+    })
+    .slice(0, 12);
+}
+
 function updateAiMemoryWithLearning(post, callback) {
-  chrome.storage.local.get({ aiMemory: { learnedRules: [] } }, (items) => {
+  chrome.storage.local.get({ aiMemory: { learnedRules: [], learningEvents: [] } }, (items) => {
     const memory = items.aiMemory || {};
-    const learnedRules = Array.isArray(memory.learnedRules) ? memory.learnedRules.slice() : [];
-    const text = post.aiLearning;
-    if (text && !learnedRules.some(rule => rule.text === text)) {
-      learnedRules.unshift({
-        text,
-        sourcePostId: post.id || String(post.savedAt || Date.now()),
-        deviationRatio: post.deviationRatio,
-        createdAt: Date.now()
-      });
+    const existingEvents = Array.isArray(memory.learningEvents) ? memory.learningEvents.slice() : [];
+    const event = buildLearningEvent(post, {
+      status: post.performanceStatus,
+      ratio: post.deviationRatio
+    });
+    const learningEvents = event
+      ? [
+          event,
+          ...existingEvents.filter(item => item.id !== event.id)
+        ].slice(0, 100)
+      : existingEvents.slice(0, 100);
+    const learnedRules = compactLearningEventsIntoRules(learningEvents, memory.learnedRules);
+    if (!event && post.performanceStatus === 'hit') {
+      addLog('Performance was within prediction range; no new deviation rule added.', 'system');
     }
     const nextMemory = {
       ...memory,
-      learnedRules: learnedRules.slice(0, 6),
+      learningEvents,
+      learnedRules,
       updatedAt: Date.now()
     };
     chrome.storage.local.set({ aiMemory: nextMemory }, () => {
@@ -209,7 +298,7 @@ function updateAiMemoryWithLearning(post, callback) {
 export function renderVault(vault) {
   const feed = document.getElementById('library-feed');
   feed.textContent = '';
-  const displayVault = Array.isArray(vault) ? vault.slice(0, 100) : [];
+  const displayVault = Array.isArray(vault) ? vault.slice(0, 100).map(normalizePostRecord) : [];
   
   const countEl = document.getElementById('library-count');
   if (countEl) {
@@ -532,10 +621,11 @@ export function renderVault(vault) {
           actualViews,
           deviationRatio: deviation.ratio,
           performanceStatus: deviation.status,
+          status: POST_STATUS.REVIEWED,
           aiLearning: buildLearning({ ...post, prediction }, deviation),
           reviewedAt: Date.now()
         };
-        currentVault[idx] = updatedPost;
+        currentVault[idx] = normalizePostRecord(updatedPost);
 
         chrome.storage.local.set({ draftVault: currentVault }, () => {
           updateAiMemoryWithLearning(updatedPost, () => {
