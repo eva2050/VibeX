@@ -7,7 +7,13 @@ const _fragDict = {
   // --- Scoring labels ---
   '疑似项目方/官方号': { en: 'Possible project/official', ja: 'プロジェクト/公式の可能性', es: 'Posible proyecto/oficial', id: 'Kemungkinan proyek/resmi' },
   '非目标账号的二级回复': { en: '2nd-level reply to non-target', ja: '非ターゲットへの二次返信', es: 'Respuesta nivel 2 a no objetivo', id: 'Balasan level 2 ke non-target' },
+  '非优先互动账号，且主题与账号策略不相关': { en: 'Non-priority account, topic unrelated to strategy', ja: '非優先アカウントで、トピックが戦略に無関係', es: 'Cuenta no prioritaria, tema irrelevante', id: 'Akun non-prioritas, topik tidak relevan' },
+  '主题与账号策略不相关': { en: 'Topic unrelated to strategy', ja: 'トピックが戦略に無関係', es: 'Tema irrelevante a la estrategia', id: 'Topik tidak relevan dengan strategi' },
+  '涉及政治/战争等敏感话题': { en: 'Involves sensitive topics like politics/war', ja: '政治/戦争などのデリケートな話題', es: 'Involucra temas sensibles (política/guerra)', id: 'Melibatkan topik sensitif (politik/perang)' },
+  '24小时内已互动过该账号': { en: 'Already interacted with this account in last 24h', ja: 'このアカウントとは過去24時間以内にやり取りしました', es: 'Ya interactuó con esta cuenta en las últimas 24h', id: 'Sudah berinteraksi dengan akun ini dlm 24j terakhir' },
   '优先互动账号': { en: 'Priority account', ja: '優先アカウント', es: 'Cuenta prioritaria', id: 'Akun prioritas' },
+  '自己的推文': { en: 'Own tweet', ja: '自分のツイート', es: 'Tweet propio', id: 'Tweet sendiri' },
+  '未读取到推文 status id，无法走官方 intent 回复。': { en: 'Tweet status id not found, cannot use official intent reply.', ja: 'ツイートのstatus idが見つかりません。公式intent返信を使用できません。', es: 'No se encontró el ID de estado del tweet, no se puede usar respuesta intent.', id: 'ID status tweet tidak ditemukan, tidak dapat menggunakan balasan intent resmi.' },
   '非目标账号': { en: 'Non-target', ja: '非ターゲット', es: 'No objetivo', id: 'Bukan target' },
   '主题相关': { en: 'Topic match', ja: 'トピック一致', es: 'Tema relevante', id: 'Topik cocok' },
   '极度热门爆款': { en: 'Viral hit', ja: 'バイラルヒット', es: 'Éxito viral', id: 'Hit viral' },
@@ -32,6 +38,8 @@ const _fragDict = {
   '回复': { en: 'Replies', ja: '返信', es: 'Respuestas', id: 'Balasan' },
   '赞': { en: 'Likes', ja: 'いいね', es: 'Me gusta', id: 'Suka' },
   // --- Misc common terms ---
+  '广告/推广内容': { en: 'Ad/Promo', ja: '広告/プロモ', es: 'Anuncio/Promo', id: 'Iklan/Promo' },
+  'AI 回复为空': { en: 'AI reply is empty', ja: 'AIの返信が空です', es: 'Respuesta de IA vacía', id: 'Balasan AI kosong' },
   '机会分': { en: 'Score:', ja: 'スコア:', es: 'Puntuación:', id: 'Skor:' },
   '互动机会分': { en: 'Opportunity score', ja: '機会スコア', es: 'Puntuación de oportunidad', id: 'Skor peluang' },
   '随时': { en: 'anytime', ja: 'いつでも', es: 'en cualquier momento', id: 'kapan saja' },

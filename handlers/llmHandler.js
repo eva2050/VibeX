@@ -3,6 +3,10 @@ import { addLog } from '../core/state.js';
 
 export function handleLLMMessage(request, sender, sendResponse, context) {
   if (request.action === "testApiConnection") {
+    if (request.apiKey && request.apiKey.startsWith('mock-')) {
+      sendResponse({ success: false, error: 'ERR_MOCK_KEY_NOT_ALLOWED' });
+      return true;
+    }
     const pingPrompt = "ping";
     const provider = request.apiProvider || 'gemini';
     const defaultModels = {
@@ -41,7 +45,11 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
     return true;
   } else if (request.action === "magicPrompt" || request.action === "extractAndRewrite") {
     const executeMagicPromptCore = (req, textToProcess, senderTab) => {
-      chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal'], (config) => {
+      chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal', 'aiPersona'], (config) => {
+        if (!config.apiKey || config.apiKey.trim() === '' || config.apiKey.startsWith('mock-')) {
+          sendResponse({ success: false, error: 'ERR_MISSING_API_KEY' });
+          return;
+        }
         if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = navigator.language.startsWith('zh') ? 'zh' : 'en';
         let promptPrefix = '';
         const currentReplyStrategy = config.replyStrategy || '专业流：专业知识 / 数据';
@@ -59,36 +67,51 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
           strategyPrompt = '你是一位混迹推特多年的资深真实网友。任务：请使用“' + currentReplyStrategy + '”的策略，为这条推文写一条高质量的破冰回复。要求：口语化，不要有AI味。';
         }
 
+        const errorMsgText = config.engineLanguage === 'en' 
+          ? '❌ Link content extraction failed, unable to rewrite. Please check if the link is valid, or try manually copying the core text.'
+          : '❌ 链接内容提取失败，无法进行仿写。请检查链接是否有效，或尝试手动复制核心文字进行输入。';
+
         switch(req.promptType) {
           case 'draft_reply':
             promptPrefix = strategyPrompt + '\n\n绝对不要在输出中包含策略名本身，直接输出回复的正文内容。\n\n原推文：\n';
             break;
+
           case 'viral_rewrite':
-            promptPrefix = `你是一位 X (Twitter) 千万级爆款操盘手。你的任务是对提供的【原始内容】进行“降维打击式”的网感重构。
+            promptPrefix = `你是一位 X (Twitter) 千万级爆款操盘手。你的任务是对提供的【原始内容】进行“降维打击式”的网感重构，彻底迎合 X 平台的推荐算法。
 不要生搬硬套固定的结构模板，请务必根据原文的【类型】和【长度】采取不同的改写策略：
 
 1. 【短平快/情绪向】（原文如果是1-2句话的感叹、碎碎念、疑问、纯情绪发泄）：
-   - 策略：必须保留其原有的“轻量感”和“情绪张力”，绝不要扩写成长篇大论。
-   - 做法：直接将其改写成一句极具煽动性的暴论、一个扎心的反问、或者一条带点幽默/讽刺的简短吐槽。字数越少越好，一刀致命。
+   - 策略：保留“轻量感”和“情绪张力”。
+   - 做法：直接改写成一句极具煽动性的暴论、扎心的反问、或幽默的吐槽。字数越少越好，一刀致命，用来骗高频点赞和回复。
 
-2. 【稍长内容/经验感悟】（原文如果是几段日常观察、生活经验或故事）：
-   - 策略：提取核心矛盾、反差或共鸣点。
-   - 做法：使用“强力钩子(Hook) + 极简短句骨架 + 开放式互动”结构。多用换行留白，剥离所有废话，制造情绪起伏。
+2. 【中篇干货/经验感悟】（原文如果是几段日常观察或故事）：
+   - 策略：利用“视觉呼吸感”拉高 Dwell Time（停留时间）。
+   - 做法：使用“反常识钩子(Hook) + 极简短句 + 垂直大留白”结构。强制大量使用空行（每讲完一句核心逻辑就空一行），迫使读者滑动屏幕减速。
 
-3. 【专业/硬核干货】（原文如果是长篇深度分析、数据、行业洞察）：
-   - 策略：降维表达。把晦涩的专业词汇翻译成人话。
-   - 做法：采用“一句话总结核心价值 + 清晰的列表(Bullet points) + 颠覆性认知”的框架。信息密度要极高，让人看一眼就想收藏。
+3. 【硬核长文/深度解析】（原文如果是长篇深度分析、数据、行业洞察）：
+   - 策略：打造“书签诱饵（Bookmark Trigger）”。X 算法极度偏好高收藏量内容。
+   - 做法：采用“一句震撼人心的结论 + 清晰的条目列表(Bullet points) + 颠覆性认知”的框架。信息密度极高，让人看一眼就忍不住点击收藏。
 
-【通用铁律】：
-- 绝不能仅仅是同义词替换或改变语序，要有属于你人设的增量思考或态度。
-- 标签限制：如果加 #标签，绝对不能超过 2 个，甚至可以不加。
-- 严禁任何“AI味”结尾（如“你觉得呢？”、“让我们一起探索”、“分享你的看法”等烂俗互动）。
-- 完成正文后必须立即停止输出！绝对禁止啰嗦。
+【强制流量与算法铁律】：
+- 【拒绝外部链接】：如果你在原文中看到任何带有 "http" 或 "www" 的外部链接，请**直接将链接删除或用一句话概括其内容**，绝对不要在输出的正文中保留任何外链（外链会被 X 平台严厉降流限权）。
+- 【禁止烂俗互动】：严禁任何“AI味”结尾（如“你觉得呢？”、“让我们一起探索”、“分享你的看法”）。
+- 【无标签约束】：绝对禁止在正文生成任何 #标签 (Hashtag)。
+- 必须有属于你人设的增量思考或态度，绝不能仅仅是同义词替换。
+
+完成正文后必须立即停止输出！绝对禁止啰嗦。
+
+【异常处理机制】：
+如果【原始内容】明显是爬虫或提取工具的报错信息（例如“Watching a video link fail to load”、“系统无法解析”、“无法获取页面内容”、“请手动输入”等），请绝对不要进行仿写！你必须直接回复：“${errorMsgText}”
 
 请直接输出重构后的高传播推文：
 
 原始内容：
 `;
+            // Inject persona context for rewrite
+            const persona = config.aiPersona || {};
+            if (persona.characteristics || persona.goals) {
+              promptPrefix = promptPrefix.replace('请直接输出重构后的高传播推文：', `【账号人设】：${persona.characteristics || '未填写'}\n【发推策略】：${persona.goals || '未填写'}\n\n请直接输出重构后的高传播推文：`);
+            }
             break;
           case 'analyze_style':
             promptPrefix = '请帮我深度拆解以下推文的爆款结构、情绪价值和潜在可模仿点，输出一个可复用的写作框架：\n\n';
@@ -112,6 +135,16 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
         if (config.feedbackLoopData && config.feedbackLoopData.length > 0 && (req.promptType === 'viral_rewrite' || req.promptType === 'draft_reply')) {
           const feedbackExamples = config.feedbackLoopData.map((fb, idx) => `[示例 ${idx+1}]\n- 你的原输出 (AI味重): ${fb.original}\n- 用户的修改版 (理想状态): ${fb.modified}`).join('\n\n');
           feedbackConstraint = `\n【自我进化避坑指南】：在过去的交互中，用户对你生成的某些内容进行了大量人工修改。请务必学习以下“错误 vs 修正”的对比案例，在这次生成中**坚决避免**使用类似原输出中那种“AI味、翻译腔”的句式！\n<避坑案例>\n${feedbackExamples}\n</避坑案例>\n\n`;
+        }
+
+        let preferenceConstraint = '';
+        if (config.feedbackLikes && config.feedbackLikes.length > 0 && (req.promptType === 'viral_rewrite' || req.promptType === 'draft_reply')) {
+          const likes = config.feedbackLikes.map((fb, idx) => `[正面案例 ${idx+1}]\n${fb.text}`).join('\n\n');
+          preferenceConstraint += `\n【正面偏好】：用户非常喜欢以下输出的风格和口吻，请在未来的生成中尽可能模仿这些案例的调性：\n<正面案例>\n${likes}\n</正面案例>\n`;
+        }
+        if (config.feedbackDislikes && config.feedbackDislikes.length > 0 && (req.promptType === 'viral_rewrite' || req.promptType === 'draft_reply')) {
+          const dislikes = config.feedbackDislikes.map((fb, idx) => `[反面案例 ${idx+1}]\n${fb.text}`).join('\n\n');
+          preferenceConstraint += `\n【反面偏好】：用户非常讨厌以下输出的风格，在这次生成中**坚决避免**使用这种语气、句式或套路：\n<反面案例>\n${dislikes}\n</反面案例>\n`;
         }
         
         let langConstraint = '';
@@ -143,16 +176,25 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
           langConstraint = baseLangConstraint();
         }
         
-        const strictAntiAI = (req.promptType === 'viral_rewrite' || req.promptType === 'draft_reply') ? `
+        let strictAntiAI = '';
+        if (req.promptType === 'viral_rewrite') {
+          strictAntiAI = `
 
-【极其严格的反AI味与排版约束】：
-1. 绝对禁止使用任何典型的AI套话，包括但不限于：“在这个瞬息万变的时代”、“深入探讨”、“不仅...而且”、“总而言之”、“毋庸置疑”、“赋能”、“底层逻辑”、“值得注意的是”、“让我们一起”。
-2. 绝对禁止使用“冷知识：”、“划重点：”、“事实证明”这种俗套的营销号开头！如果内容很长，用最简短的词汇单刀直入。
+【极其严格的反AI味与 X 平台算法排版约束】：
+1. 绝对禁止使用任何典型的AI套话...
+2. 【Hook（钩子）至上】：开头第一句话必须制造悬念、反常识或者信息落差！绝对禁止使用“冷知识：”、“划重点：”、“事实证明”这种俗套的营销号开头。如果内容很长，用最简短的词汇单刀直入。
 3. 句子必须极其口语化、接地气。像真实网友随手在手机上敲出来的文字，允许存在适当的口语化破绽和情绪宣泄。
 4. 【排版强迫症】：中文字符与英文字母/数字之间**必须**加一个半角空格（例如：欧洲 Mistral）。
-5. 【视觉呼吸感】：长文本必须分段，段落之间必须留出空行（空一行），绝不要把多句话挤在一团。
+5. 【极度追求视觉呼吸感】：长文本必须频繁分段！每一句话或每两句话之间**必须**留出空行。绝不要把多句话挤在一团，利用垂直空间占用拉高读者的 Dwell Time。
 6. 【社交化微表情】：请在句尾或情绪爆发点极其自然地加上1-2个Emoji（例如😅、🤔、🔥等），提升社交属性。
-7. 【绝对禁忌】：**绝对禁止在生成的回复或推文中包含任何 #标签 (Hashtag)。无论如何都不要生成带有 # 符号的话题标签，只输出纯文本内容！**` : '';
+7. 【绝对禁忌一：无标签】：**绝对禁止生成任何 #标签 (Hashtag)。无论如何都不要生成带有 # 符号的话题标签！**
+8. 【绝对禁忌二：无外链】：**绝对禁止在正文中包含任何外部 URL 链接。所有的外部链接必须被删除或用文字概括！**
+9. 【禁用 Markdown】：推特不支持 Markdown 解析。**绝对禁止使用任何 Markdown 格式符号**。如果需要强调，直接换行或用 Emoji。
+10. 【最终输出铁律】：**绝对禁止输出多个备选方案！绝对禁止输出任何分析、打分、评价等废话前缀！**`;
+        } else if (req.promptType === 'draft_reply') {
+          // 只保留一条防止输出多个备选选项和 Markdown 的底线，不添加任何结构排版限制
+          strictAntiAI = `\n\n【输出铁律】：**绝对禁止输出多个备选方案或分析打分等废话前缀！绝对禁止使用任何 Markdown 格式符号。只能输出唯一的一条真实回复文本！**`;
+        }
 
         const currentYear = new Date().getFullYear();
         const currentMonth = new Date().getMonth() + 1;
@@ -163,7 +205,7 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
           regenerateConstraint = `\n\n【用户反馈 - 重新生成指令】：注意！用户点击了“重新生成”，这说明你上一次生成的文案**非常不符合预期，导致用户完全不想使用甚至懒得修改**。请你立刻反思，抛弃上一版的切入点、废话和毫无新意的逻辑，尝试换一个完全不同的、更新颖的、更一针见血的角度来进行本次生成！`;
         }
 
-        callLLM(promptPrefix + timeContext + langConstraint + styleConstraint + feedbackConstraint + strictAntiAI + regenerateConstraint + '\n\n待处理文本：\n' + textToProcess, config, false, (chunk) => {
+        callLLM(promptPrefix + timeContext + langConstraint + styleConstraint + feedbackConstraint + preferenceConstraint + strictAntiAI + regenerateConstraint + '\n\n待处理文本：\n' + textToProcess, config, false, (chunk) => {
           if (senderTab && senderTab.id) {
             chrome.tabs.sendMessage(senderTab.id, { action: 'magicPromptStreamChunk', chunk: chunk }).catch(()=>null);
           } else {
@@ -186,7 +228,8 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
                  });
                });
              }
-             sendResponse({ success: true, result: result });
+             const cleanResult = result.replace(/\*\*/g, '').replace(/__/g, '');
+             sendResponse({ success: true, result: cleanResult });
           })
           .catch(error => sendResponse({ success: false, error: error.message }));
       });
@@ -204,7 +247,7 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
       }
       
       chrome.storage.local.get(['apiKey'], (res) => {
-        const isComplexPlatform = url.match(/(zhihu\.com|feishu\.cn|mp\.weixin\.qq\.com|douyin\.com|bilibili\.com|youtube\.com|youtu\.be|xiaohongshu\.com\/explore|tiktok\.com|kuaishou\.com)/i);
+        const isComplexPlatform = url.match(/(zhihu\.com|feishu\.cn|mp\.weixin\.qq\.com|douyin\.com|bilibili\.com|xiaohongshu\.com|xhslink\.com|tiktok\.com|kuaishou\.com|reddit\.com)/i);
         
         const DATAHUB_API_KEY = "zUBzC9YgT9f8VLrh"; 
         
@@ -312,19 +355,18 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
 
 【极其严格的反AI味与排版约束】：
 - 绝对禁止使用任何典型的AI套话，包括但不限于：“在这个瞬息万变的时代”、“深入探讨”、“不仅...而且”、“总而言之”、“毋庸置疑”、“赋能”、“底层逻辑”、“值得注意的是”、“让我们一起”。
-- 绝对禁止使用“冷知识：”、“划重点：”、“事实证明”这种俗套的营销号开头！如果内容很长，用最简短的词汇单刀直入。
-- 句子必须极其口语化、接地气。像真实网友随手在手机上敲出来的文字，允许存在适当的口语化破绽和情绪宣泄。
-- 【排版强迫症】：中文字符与英文字母/数字之间**必须**加一个半角空格（例如：欧洲 Mistral）。
-- 【视觉呼吸感】：长文本必须分段，段落之间必须留出空行（空一行），绝不要把多句话挤在一团。
-- 【社交化微表情】：请在句尾或情绪爆发点极其自然地加上1-2个Emoji（例如😅、🤔、🔥等），提升社交属性。
-- **绝对禁忌：绝对禁止生成任何 #标签 (Hashtag)！不要包含任何带有 # 符号的话题标签。**
+- 【Hook（钩子）至上】：开头必须是反常识观点、情绪暴论或信息落差，直接抓人眼球。绝对禁止使用“冷知识：”、“划重点：”等俗套开头。
+- 句子必须极其口语化、接地气。允许存在适当的口语化破绽和情绪宣泄。
+- 【视觉呼吸感】：长文本必须频繁分段！每一句话或每两句话之间**必须**留出空行。绝不要把多句话挤在一团，以此拉长读者在推文上的停留时间。
+- 【排版强迫症】：中英混排必须加空格。在情绪爆发点极其自然地加上1-2个Emoji。
+- **绝对禁忌一：绝对禁止生成任何 #标签 (Hashtag)！**
+- **绝对禁忌二：绝对禁止在生成正文中包含任何外部 URL 链接（外链会被平台严厉限流惩罚）！原有的外链请用文字概括。**
+- 禁用 Markdown 加粗或斜体（* 或 **）。
 
 【写作约束】：
-- 必须以第一人称叙述，写得像真人写的推文，必须饱含干货/洞察/故事/数字，有较强判断力。
-- 保持推特短文风格，长短适中，可分段或使用列表，加入适量 emoji 提升可读性。
-- 如果原推在分享干货、教程或数据，请提炼并重构，绝对不要照抄原推的用词。
-- 严禁空泛鸡血口号（例如“快来看看吧！”“让我们一起努力吧！”）。
-- 直接输出改写后的推文文本，绝对不要带有任何“以下是改写后的内容：”或“好的，为您改写：”等废废话前缀。`;
+- 必须以第一人称叙述，饱含干货/洞察/故事/数字。
+- 如果原推在分享干货、教程或数据，请务必将其提炼为条理清晰的列表（Bullet Points），这能极大触发读者的“收藏（Bookmark）”行为，获取高算法权重。
+- 直接输出改写后的推文文本，绝对不要带有任何“以下是改写后的内容：”或“好的，为您改写：”等废话前缀。`;
 
     chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'engineLanguage'], (config) => {
       let langConstraint = '';

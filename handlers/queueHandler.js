@@ -42,9 +42,16 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
     const author = request.tweetAuthor || '未知用户';
     const replyText = request.replyText || '';
     
-    chrome.storage.local.get(['stats', 'sessionReplyCount', 'repliesToday', 'lastReplyDate', 'onboardingStrategy'], (res) => {
+    chrome.storage.local.get(['stats', 'sessionReplyCount', 'repliesToday', 'lastReplyDate', 'onboardingStrategy', 'recentRepliedAuthors'], (res) => {
       const stats = res.stats || { tweetsProcessed: 0, repliesSent: 0 };
       stats.repliesSent = (stats.repliesSent || 0) + 1;
+      
+      const recentAuthors = res.recentRepliedAuthors || {};
+      recentAuthors[author.toLowerCase()] = Date.now();
+      const nowTs = Date.now();
+      for (const k in recentAuthors) {
+        if (nowTs - recentAuthors[k] > 24 * 60 * 60 * 1000) delete recentAuthors[k];
+      }
       
       const nowString = new Date().toDateString();
       let repliesToday = res.lastReplyDate === nowString ? (res.repliesToday || 0) : 0;
@@ -77,6 +84,7 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
         repliesToday,
         lastReplyDate: nowString,
         twitterCooldownUntil,
+        recentRepliedAuthors: recentAuthors,
         lastReplySent: {
           tweetAuthor: author,
           replyText,

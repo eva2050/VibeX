@@ -143,7 +143,7 @@ function isProfilePath(pathname = '') {
 
 function isDiscoverySurfacePage() {
   const pathname = window.location.pathname || '';
-  return pathname === '/home' || pathname === '/explore' || pathname === '/search';
+  return pathname === '/home' || pathname === '/explore' || pathname === '/search' || pathname.startsWith('/i/lists/');
 }
 
 function getCurrentProfilePath() {
@@ -628,8 +628,18 @@ function getReplyOpportunity(article, author, text, state = {}) {
 
 function getReplySkipReason(author, text, state = {}) {
   if (isSensitiveReplyTarget(text)) return '涉及政治/战争等敏感话题';
+  
+  const authorHandle = String(author || '').toLowerCase();
+  const recentAuthors = state.recentRepliedAuthors || {};
+  if (recentAuthors[authorHandle]) {
+    const hoursSinceLastReply = (Date.now() - recentAuthors[authorHandle]) / (60 * 60 * 1000);
+    if (hoursSinceLastReply < 24) {
+      return `24小时内已互动过该账号`;
+    }
+  }
+
   const targetHandles = collectTargetHandles(state);
-  const isTargetAuthor = targetHandles.includes(String(author || '').toLowerCase());
+  const isTargetAuthor = targetHandles.includes(authorHandle);
   if (targetHandles.length > 0 && !isTargetAuthor && !hasRelevantTopic(text, state)) {
     return '非优先互动账号，且主题与账号策略不相关';
   }
@@ -715,7 +725,7 @@ function scrapeTweets() {
     'twitterCooldownUntil', 'apiCooldownUntil', 'onboardingStrategy', 'targetUsers',
     'pendingReply', 'pendingPost', 'lastDiscoverySearchAt', 'discoverySearchIndex',
     'currentDiscoveryQuery', 'lastSurfaceNavigationAt',
-    'automationStartTime', 'sessionReplyCount', 'sessionPostCount'
+    'automationStartTime', 'sessionReplyCount', 'sessionPostCount', 'recentRepliedAuthors'
   ], (result) => {
     if (!result.isRunning) return;
     if (result.isAutoPaused) {
@@ -730,9 +740,7 @@ function scrapeTweets() {
     if (result.twitterCooldownUntil && Date.now() < result.twitterCooldownUntil) return;
     if (result.apiCooldownUntil && Date.now() < result.apiCooldownUntil) return;
     
-    const persona = result.aiPersona || {};
-    const hasPersona = persona.targetUsers || persona.characteristics || persona.goals || result.accountBio;
-    if (!hasPersona) return;
+    // Legacy persona check removed since we now use reply strategy & custom prompts
     if (maybeNavigateToHomeSurface(result, '当前页面不是推荐/搜索流')) return;
     
     const articles = document.querySelectorAll('article[data-testid="tweet"]');
@@ -899,7 +907,7 @@ function scrapeTweets() {
 }
 
 // ==========================================
-// Widget System & Confi (烤仔) AI Pet
+// Widget System & VibeX (VibeX) AI Pet
 // ==========================================
 let botState = {};
 let logPanelOpen = false;
@@ -909,8 +917,8 @@ let currentRewriteTweet = null;
 let selectedArchetype = 'ai_product_kol';
 let selectedStyle = 'concise';
 
-// Confi Pet State
-let petBubbleText = "嗨！我是烤仔！点击我可以和我聊天，或者帮你分析推文哦~ 🚀";
+// VibeX Pet State
+let petBubbleText = "嗨！我是VibeX！点击我可以和我聊天，或者帮你分析推文哦~ 🚀";
 let petBubbleVisible = false;
 let petBubbleTimeout = null;
 let lastAnalyzedTweetId = "";
@@ -1137,10 +1145,10 @@ function checkIdleChat() {
   
   if (Math.random() < 0.4) {
     const explorerPhrases = [
-      "Conflux 的星辰大海真是太美妙了！🌌 我们一起探索吧！",
+      "VibeX 的星辰大海真是太美妙了！🌌 我们一起探索吧！",
       "今天的增长计划在稳步前进哦！要不要写一条关于 Web3 的推文？",
-      "烤仔探测器已锁定！你可以随时点我让我帮你写推文哦~ ✨",
-      "烤仔今天也在努力学习新姿势，主人今天有什么新想法吗？📝",
+      "VibeX探测器已锁定！你可以随时点我让我帮你写推文哦~ ✨",
+      "VibeX今天也在努力学习新姿势，主人今天有什么新想法吗？📝",
       "如果你看到好玩的推文，点开我的聊天面板，让我帮你吐槽！💬"
     ];
     
@@ -1148,7 +1156,7 @@ function checkIdleChat() {
       "时间就是粉丝！主人，快来发帖冲数据！📈",
       "今天还没有新增回复，搞钱搞钱！💰 点我快速分析热门推文！",
       "让我来帮你写一条带节奏的爆款推文吧！点击聊天即可开始！🎯",
-      "截流的本质是提供更高的信息增量。来，让烤仔帮你出谋划策！",
+      "截流的本质是提供更高的信息增量。来，让VibeX帮你出谋划策！",
       "对标账号又有新动作了？赶紧让我来解构一下他们的爆款逻辑！"
     ];
     
@@ -1267,8 +1275,8 @@ function renderChatConsoleMessages() {
   
   if (messages.length === 0) {
     const greetingText = botState.petPersonality === 'hacker'
-      ? "喂！终于舍得点我啦？我是烤仔！快把好推文、选题或者想法发给我，让我这个增长专家帮你搞定一切！📈"
-      : "嗨！主人！我是烤仔，你的太空增长小助手！🚀 无论是要写推文、吐槽热门话题，还是更新长期记忆，快对我说吧！✨";
+      ? "喂！终于舍得点我啦？我是VibeX！快把好推文、选题或者想法发给我，让我这个增长专家帮你搞定一切！📈"
+      : "嗨！主人！我是VibeX，你的专属增长助手！🚀 无论是要写推文、吐槽热门话题，还是更新长期记忆，快对我说吧！✨";
       
     messagesContainer.innerHTML = `
       <div class="x-bot-chat-msg-row assistant">
@@ -1305,7 +1313,7 @@ function showChatTypingIndicator(show) {
     const typingRow = document.createElement('div');
     typingRow.className = 'x-bot-chat-msg-row assistant x-chat-typing-row';
     typingRow.innerHTML = `
-      <span class="x-bot-chat-msg-label">${tUI('烤仔正在思考...')}</span>
+      <span class="x-bot-chat-msg-label">${tUI('VibeX正在思考...')}</span>
       <div class="x-bot-chat-msg-bubble x-chat-typing" style="display:flex;">
         <div class="x-bot-chat-typing-dot"></div>
         <div class="x-bot-chat-typing-dot"></div>
@@ -1357,7 +1365,7 @@ function sendChatMessage(text) {
     
     if (chrome.runtime.lastError || !response?.success) {
       const errorText = chrome.runtime.lastError?.message || response?.error || "消息发送失败，请检查配置";
-      const errorEntry = { role: 'assistant', content: `❌ 烤仔好像断网了：${errorText}`, time: Date.now() };
+      const errorEntry = { role: 'assistant', content: `❌ VibeX好像断网了：${errorText}`, time: Date.now() };
       botState.agentChatMessages = [...botState.agentChatMessages, errorEntry];
       renderChatConsoleMessages();
       const __body = document.querySelector('.x-bot-chat-body');
@@ -1433,7 +1441,7 @@ function ensureChatConsole() {
       </div>
       
       <div class="x-chat-composer">
-        <textarea class="x-chat-textarea" id="x-chat-textarea" rows="1" placeholder="和烤仔聊聊..."></textarea>
+        <textarea class="x-chat-textarea" id="x-chat-textarea" rows="1" placeholder="和VibeX聊聊..."></textarea>
         <button class="x-chat-send-btn" id="x-chat-send-btn">
           <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
         </button>
@@ -2472,14 +2480,33 @@ function injectStyles() {
 // Simple localization for content script
 function tUI(msg) {
   const lang = botState.engineLanguage || 'zh';
-  if (lang === 'zh') return msg;
+  
+  const errorCodes = {
+    'ERR_MISSING_API_KEY': {
+      zh: '请先在系统设置面板中配置并保存您真实的 API Key！',
+      en: 'Please configure and save your real API Key in Settings first!'
+    },
+    'ERR_MOCK_KEY_NOT_ALLOWED': {
+      zh: '请配置真实的 API Key，当前为本地预览占位符',
+      en: 'Please configure a real API Key, current is a mock placeholder'
+    }
+  };
+
+  let res = msg;
+  for (const [code, trans] of Object.entries(errorCodes)) {
+    if (res.includes(code)) {
+      res = res.replace(code, trans[lang] || trans['zh']);
+    }
+  }
+
+  if (lang === 'zh') return res;
   
   const dict = {
     '❌ 无法提取推文文字内容': '❌ Failed to extract tweet text',
     '❌ 生成失败: ': '❌ Generation failed: ',
     '❌ 收录失败：扩展后台未就绪': '❌ Save failed: extension backend not ready',
     'ℹ️ 该推文已被收录': 'ℹ️ Tweet already saved',
-    '📥 成功收录至烤仔灵感库！': '📥 Successfully saved to Vault!',
+    '📥 成功收录至VibeX灵感库！': '📥 Successfully saved to Vault!',
     '❌ 收录失败: ': '❌ Save failed: ',
     '✅ 内容已填入': '✅ Content filled',
     '❌ 未找到输入框，请手动粘贴': '❌ Input box not found, please paste manually',
@@ -2491,11 +2518,11 @@ function tUI(msg) {
     '回复': 'Reply',
     '一键仿写': 'One-click Rewrite',
     '智能回复': 'Smart Reply',
-    '烤仔正在思考...': 'VibeX is thinking...',
-    'AI 正在思考...': 'AI is thinking...'
+    'VibeX正在思考...': 'VibeX is thinking...',
+    'AI 正在思考...': 'AI is thinking...',
+    '请先在系统设置面板中配置并保存 API Key！': 'Please configure and save your API Key in Settings first!'
   };
 
-  let res = msg;
   for (const [zh, en] of Object.entries(dict)) {
     if (res.includes(zh)) {
       res = res.replace(zh, en);
@@ -2656,6 +2683,11 @@ function injectCollectButtons() {
         contextData: tweetData
       }, (res) => {
         if (chrome.runtime.lastError || !res || res.error) {
+          clearInterval(showLoader);
+          if (streamBubble) {
+            streamBubble.remove();
+            streamBubble = null;
+          }
           showToast('❌ 生成失败: ' + (chrome.runtime.lastError?.message || res?.error), 'error');
           return;
         }
@@ -2721,7 +2753,7 @@ function handleCollectClick(article) {
       if (response.alreadyExists) {
         showToast('ℹ️ 该推文已被收录', 'info');
       } else {
-        showToast('📥 成功收录至烤仔灵感库！', 'success');
+        showToast('📥 成功收录至VibeX灵感库！', 'success');
       }
     } else {
       showToast('❌ 收录失败: ' + (response?.message || '未知错误'), 'error');

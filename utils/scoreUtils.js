@@ -36,37 +36,34 @@ function bestViralCandidate(candidates = [], fallback = '') {
   return normalized[0]?.text || formatTweetForX(fallback);
 }
 
-function normalizeGeneratedTweets(parsed) {
+function evaluateGeneratedTweets(parsed) {
   const rawItems = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.tweets) ? parsed.tweets : []);
-  const normalized = rawItems
+  return rawItems
     .map(item => {
       if (typeof item === 'string') {
-        return {
-          text: formatTweetForX(item),
-          type: 'unknown',
-          scores: scoreObject({}),
-          score: totalViralScore({})
-        };
+        return { text: formatTweetForX(item), type: 'unknown', scores: scoreObject({}), score: totalViralScore({}) };
       }
-
       const scores = scoreObject(item?.scores || {});
       return {
         text: formatTweetForX(item?.text),
         type: memoryValueToText(item?.type || item?.contentType || 'unknown'),
         scores,
-        score: totalViralScore(scores)
+        score: totalViralScore(scores),
+        rationale: memoryValueToText(item?.qualityRationale || item?.rationale)
       };
     })
     .filter(item => item.text)
     .map(item => ({
       ...item,
-      qualityIssue: getGeneratedTweetRejectionReason(item.text)
+      qualityIssue: getGeneratedTweetRejectionReason(item.text) || (item.score < 42 ? `AI 质量自评得分过低 (${item.score}/60)，未达到 42 分发布门槛` : '')
     }))
     .sort((a, b) => b.score - a.score);
-
-  return normalized.filter(item => !item.qualityIssue);
 }
-export { scoreNumber, scoreObject, totalViralScore, bestViralCandidate, normalizeGeneratedTweets, getGeneratedTweetRejectionReason, getGeneratedReplyRejectionReason };
+
+function normalizeGeneratedTweets(parsed) {
+  return evaluateGeneratedTweets(parsed).filter(item => !item.qualityIssue);
+}
+export { scoreNumber, scoreObject, totalViralScore, bestViralCandidate, normalizeGeneratedTweets, evaluateGeneratedTweets, getGeneratedTweetRejectionReason, getGeneratedReplyRejectionReason };
 
 function getGeneratedTweetRejectionReason(text = '') {
   const normalized = compactWhitespace(text);
@@ -90,7 +87,7 @@ function getGeneratedTweetRejectionReason(text = '') {
 
 function getGeneratedReplyRejectionReason(reply = '', tweet = '') {
   const normalized = String(reply || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  if (!normalized) return '';
+  if (!normalized) return 'AI 回复为空';
   if (visualLength(reply) > 110) return 'AI 回复过长';
   if (countPatternMatches(reply, /#/g) > 1) return 'AI 回复包含过多标签';
   if (LOW_VALUE_REPLY_PATTERNS.some(pattern => pattern.test(normalized))) {

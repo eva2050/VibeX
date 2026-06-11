@@ -1,6 +1,6 @@
 import { getCurrentLang, t, translateBackendLog, applyLanguage } from './ui/i18n.js';
 import { renderLogs, addLog, renderVault } from './ui/logs.js';
-import { loadMemory, saveMemory, bindActions, updatePreflightStatus, updateEngineBadge, addStyleItem, setupCustomSelects, applyTheme, updateApiStatusIndicator, resetCustomPrompt } from './ui/settings.js';
+import { loadMemory, saveMemory, bindActions, updatePreflightStatus, updateEngineBadge, addStyleItem, setupCustomSelects, applyTheme, updateApiStatusIndicator, resetCustomPrompt, updateGistStatusUI } from './ui/settings.js';
 
 /**
  * VibeX - Main Controller
@@ -53,6 +53,29 @@ export function recordFeedbackLoop(original, modified, context) {
   });
 }
 
+// Preference Feedback Helper (Like/Dislike)
+export function recordPreferenceFeedback(text, type, context) {
+  if (typeof chrome === 'undefined' || !chrome.storage || !text) return;
+  const storageKey = type === 'like' ? 'feedbackLikes' : 'feedbackDislikes';
+  
+  chrome.storage.local.get({ [storageKey]: [] }, (items) => {
+    const feedbackList = items[storageKey];
+    feedbackList.push({
+      text: text.trim(),
+      context: context?.data?.text || '未知上下文',
+      timestamp: Date.now()
+    });
+    
+    // Keep only the last 10 items
+    if (feedbackList.length > 10) feedbackList.shift();
+    
+    chrome.storage.local.set({ [storageKey]: feedbackList }, () => {
+      addLog(type === 'like' ? '已收录为正面案例，后续将倾向此风格' : '已收录为反面案例，后续将避免此风格', 'system');
+      showToast(type === 'like' ? '感谢反馈，AI 将多生成此类风格！' : '感谢反馈，AI 将避免生成此类风格！');
+    });
+  });
+}
+
 function onReady(fn) {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', fn);
@@ -95,7 +118,7 @@ function initNavigation() {
   const views = document.querySelectorAll('.view-panel');
   
   navItems.forEach(item => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
       // Clear active states
       navItems.forEach(nav => nav.classList.remove('active'));
       views.forEach(view => {
@@ -112,9 +135,15 @@ function initNavigation() {
       // Update preflight status to check if banner should be hidden
       const currentApiKey = document.getElementById('api-key-input')?.value || '';
       updatePreflightStatus(currentApiKey);
+
+      // Save globally if it was a real user click
+      if (e.isTrusted) {
+        chrome.storage.local.set({ activeSidePanelTab: item.dataset.view });
+      }
     });
   });
 }
+
 
 // ==========================================
 // 2. STATE MANAGEMENT (Storage)
@@ -151,7 +180,13 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 function setupStorageListener() {
   if (typeof chrome === 'undefined' || !chrome.storage) return;
 
-  chrome.storage.local.get(['pendingAutoRewrite', 'pendingAutoReply', 'logs'], (items) => {
+  chrome.storage.local.get(['pendingAutoRewrite', 'pendingAutoReply', 'logs', 'activeSidePanelTab'], (items) => {
+    if (items.activeSidePanelTab) {
+      const targetNav = document.querySelector(`.nav-item[data-view="${items.activeSidePanelTab}"]`);
+      if (targetNav && !targetNav.classList.contains('active')) {
+        targetNav.click();
+      }
+    }
     if (items.logs) {
       renderLogs(items.logs);
     }
@@ -177,8 +212,19 @@ function setupStorageListener() {
       if (changes.logs) {
         renderLogs(changes.logs.newValue);
       }
+      if (changes.activeSidePanelTab && changes.activeSidePanelTab.newValue) {
+        const targetNav = document.querySelector(`.nav-item[data-view="${changes.activeSidePanelTab.newValue}"]`);
+        if (targetNav && !targetNav.classList.contains('active')) {
+          targetNav.click();
+        }
+      }
       if (changes.draftVault) {
         renderVault(changes.draftVault.newValue);
+      }
+      if (changes.gistStatus || changes.gistLastSyncAt || changes.gistLastError || changes.gistToken || changes.gistAutoSync) {
+        chrome.storage.local.get(['gistToken', 'gistStatus', 'gistLastSyncAt', 'gistLastError'], (res) => {
+          updateGistStatusUI(res);
+        });
       }
       if (changes.pendingAutoRewrite && changes.pendingAutoRewrite.newValue) {
         const tweetData = changes.pendingAutoRewrite.newValue;
@@ -243,14 +289,19 @@ export function executeMagicAction(actionType, isRegenerate = false) {
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   const isUrl = urlRegex.test(textContent);
 
-  if (!apiKey && !isUrl) {
+  if (!apiKey || apiKey.startsWith('mock-')) {
     addLog(t('log_no_apikey'), 'error');
+    showToast('缺少真实的 API Key，无法生成', 'error');
     return;
   }
 
   const zone = document.getElementById('generation-zone');
   const loader = document.getElementById('generation-loader');
   const resultBox = document.getElementById('generation-result');
+  
+  // Clear like/dislike feedback button states on new generation
+  document.getElementById('btn-feedback-like')?.classList.remove('active', 'primary');
+  document.getElementById('btn-feedback-dislike')?.classList.remove('active', 'primary');
   
   zone.classList.remove('hidden');
   loader.classList.remove('hidden');
@@ -278,8 +329,15 @@ export function executeMagicAction(actionType, isRegenerate = false) {
     }, (response) => {
       loader.classList.add('hidden');
       if (chrome.runtime.lastError || !response || response.error) {
+        const errorMsg = chrome.runtime.lastError?.message || response?.error || response?.message;
+        // Chrome MV3 5-minute timeout protection: ignore if we already got streaming chunks
+        if (errorMsg && errorMsg.includes("closed before a response was received") && resultBox.value.length > 20) {
+           addLog(`API 响应极慢，触发了超时保护，但已保留当前生成的 ${resultBox.value.length} 个字符。`, 'warn');
+           originalAIOutput = resultBox.value;
+           return;
+        }
         const failPrefix = t('generate_fail_prefix', '生成失败: ');
-        resultBox.textContent = failPrefix + (chrome.runtime.lastError?.message || response?.error || response?.message);
+        resultBox.textContent = failPrefix + errorMsg;
         addLog(t('log_task_fail'), 'error');
       } else {
         resultBox.textContent = response.result;

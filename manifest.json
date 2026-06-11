@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "VibeX: Put Your X Growth on Autopilot",
+  "name": "VibeX",
   "version": "1.0",
   "description": "The AI copilot for X creators. Automate viral replies, smart posts, and audience growth while you sleep.",
   "icons": {
@@ -21,7 +21,8 @@
     "*://x.com/*",
     "*://*.x.com/*",
     "*://twitter.com/*",
-    "*://*.twitter.com/*"
+    "*://*.twitter.com/*",
+    "*://api.github.com/*"
   ],
   "background": {
     "service_worker": "background.js",

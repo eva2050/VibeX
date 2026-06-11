@@ -9,7 +9,7 @@ export function updatePreflightStatus(apiKey) {
   const activeTab = document.querySelector('.nav-item.active');
   const isSettingsTab = activeTab && activeTab.dataset.view === 'view-persona';
   
-  if (!apiKey || apiKey.trim() === '') {
+  if (!apiKey || apiKey.trim() === '' || apiKey.startsWith('mock-')) {
     if (banner) {
       if (isSettingsTab) {
         banner.classList.add('hidden');
@@ -46,7 +46,12 @@ export function loadMemory() {
     engineLanguage: 'en',
     uiTheme: 'auto',
     draftVault: [],
-    onboardingStrategy: {}
+    onboardingStrategy: {},
+    aiPersona: {},
+    gistToken: '',
+    gistAutoSync: false,
+    gistStatus: '',
+    gistLastSyncAt: 0
   }, (items) => {
     const apiKeyInput = document.getElementById('api-key-input');
     if (apiKeyInput) {
@@ -57,6 +62,23 @@ export function loadMemory() {
         apiKeyInput.value = items.apiKey || '';
       }
       updateApiStatusIndicator();
+      updatePreflightStatus(apiKeyInput.value.trim());
+    }
+    
+    const gistTokenInput = document.getElementById('gist-token');
+    if (gistTokenInput) {
+      gistTokenInput.value = items.gistToken || '';
+      updateGistStatusUI(items);
+    }
+    
+    const customPersonaInput = document.getElementById('custom-persona');
+    if (customPersonaInput) {
+      customPersonaInput.value = items.aiPersona?.characteristics || '';
+    }
+    
+    const customTweetingStrategyInput = document.getElementById('custom-tweeting-strategy');
+    if (customTweetingStrategyInput) {
+      customTweetingStrategyInput.value = items.aiPersona?.goals || '';
     }
     
     const apiProvider = document.getElementById('api-provider');
@@ -153,6 +175,14 @@ export function loadMemory() {
         document.querySelectorAll('#engine-language-container .custom-select-option').forEach(o => o.classList.remove('selected'));
         opt.classList.add('selected');
       }
+      
+      let gistTokenTimeout;
+      document.getElementById('gist-token')?.addEventListener('input', () => {
+        clearTimeout(gistTokenTimeout);
+        gistTokenTimeout = setTimeout(saveMemory, 800);
+      });
+      
+      const themeTrigger = document.getElementById('ui-theme-trigger');
     }
 
     const themeInput = document.getElementById('ui-theme');
@@ -196,7 +226,9 @@ export function saveMemory() {
     customPromptGlobal: document.getElementById('custom-strategy-prompt')?.value || '',
     styleTrainingData: Array.from(document.querySelectorAll('#style-training-list textarea')).map(t => t.value.trim()).filter(t => t !== ''),
     engineLanguage: document.getElementById('engine-language')?.value || 'en',
-    uiTheme: document.getElementById('ui-theme')?.value || 'auto'
+    uiTheme: document.getElementById('ui-theme')?.value || 'auto',
+    gistToken: document.getElementById('gist-token')?.value.trim() || '',
+    gistAutoSync: !!document.getElementById('gist-token')?.value.trim()
   };
 
   if (window.customPrompts) {
@@ -204,9 +236,25 @@ export function saveMemory() {
   }
 
   if (chrome.storage) {
-    chrome.storage.local.set(toSave, () => {
+    chrome.storage.local.get(['aiPersona', 'gistToken'], (res) => {
+      let aiPersona = res.aiPersona || {};
+      const personaVal = document.getElementById('custom-persona')?.value.trim();
+      const strategyVal = document.getElementById('custom-tweeting-strategy')?.value.trim();
+      if (personaVal !== undefined) aiPersona.characteristics = personaVal;
+      if (strategyVal !== undefined) aiPersona.goals = strategyVal;
+      toSave.aiPersona = aiPersona;
+      
+      // Reset status if token changed
+      if (toSave.gistToken !== res.gistToken) {
+        toSave.gistStatus = 'pending';
+        toSave.gistLastSyncAt = 0;
+        toSave.gistId = '';
+      }
+
+      chrome.storage.local.set(toSave, () => {
       applyTheme(toSave.uiTheme);
       applyLanguage(toSave.engineLanguage);
+      updateGistStatusUI(toSave);
       
       const automationModeInput = document.getElementById('automation-mode');
       if (automationModeInput) {
@@ -240,6 +288,7 @@ export function saveMemory() {
         existingToast.style.opacity = '0';
         setTimeout(() => existingToast.remove(), 200);
       }, 1000);
+    });
     });
   }
 }
@@ -286,15 +335,21 @@ export function bindActions() {
         };
         if (providerInput) providerInput.value = detectedProvider;
         if (modelInput) modelInput.value = defaults[detectedProvider] || 'gemini-2.5-flash';
-        saveMemory();
       }
     }
+    saveMemory(); // Unconditionally save on input to prevent sync issues from side panels
     updateApiStatusIndicator();
   });
   
   // Auto-save listeners
   const apiInput = document.getElementById('api-key-input');
   if (apiInput) apiInput.addEventListener('blur', saveMemory);
+  
+  const customPersonaInput = document.getElementById('custom-persona');
+  if (customPersonaInput) customPersonaInput.addEventListener('blur', saveMemory);
+
+  const customTweetingStrategyInput = document.getElementById('custom-tweeting-strategy');
+  if (customTweetingStrategyInput) customTweetingStrategyInput.addEventListener('blur', saveMemory);
   
   const langSelect = document.getElementById('engine-language');
   if (langSelect) langSelect.addEventListener('change', saveMemory);
@@ -318,11 +373,37 @@ export function bindActions() {
   const btnRegen = document.getElementById('btn-regenerate');
   if (btnRegen) {
     btnRegen.addEventListener('click', () => {
+      // Clear active states on regenerate
+      document.getElementById('btn-feedback-like')?.classList.remove('active', 'primary');
+      document.getElementById('btn-feedback-dislike')?.classList.remove('active', 'primary');
+      
       if (lastActionType) {
         executeMagicAction(lastActionType, true);
       } else {
         addLog(t('log_no_context'), 'error');
       }
+    });
+  }
+
+  const btnLike = document.getElementById('btn-feedback-like');
+  if (btnLike) {
+    btnLike.addEventListener('click', () => {
+      btnLike.classList.add('active', 'primary');
+      document.getElementById('btn-feedback-dislike')?.classList.remove('active', 'primary');
+      import('../options.js').then(module => {
+        module.recordPreferenceFeedback(module.originalAIOutput, 'like', currentContext);
+      });
+    });
+  }
+
+  const btnDislike = document.getElementById('btn-feedback-dislike');
+  if (btnDislike) {
+    btnDislike.addEventListener('click', () => {
+      btnDislike.classList.add('active', 'primary');
+      document.getElementById('btn-feedback-like')?.classList.remove('active', 'primary');
+      import('../options.js').then(module => {
+        module.recordPreferenceFeedback(module.originalAIOutput, 'dislike', currentContext);
+      });
     });
   }
 
@@ -557,7 +638,7 @@ export function addStyleItem(text = '', container = null) {
     textarea.style.paddingBottom = '8px';
     textarea.scrollTop = 0;
   });
-  textarea.placeholder = '粘贴一条过往的高赞推文...';
+  textarea.placeholder = t('placeholder_style', '粘贴一条过往的高赞推文...');
   textarea.value = text;
   
   textarea.addEventListener('input', () => {
@@ -654,7 +735,37 @@ export function applyTheme(theme) {
   }
 }
 
+export function updateGistStatusUI(items) {
+  const dot = document.getElementById('gist-status-dot');
+  const text = document.getElementById('gist-status-text');
+  if (!dot || !text) return;
+  
+  text.removeAttribute('data-i18n');
+  
+  if (!items.gistToken) {
+    dot.style.background = '#888';
+    text.textContent = window.t ? window.t('sync_status_unconfigured') : '未配置';
+  } else if (items.gistStatus === 'error') {
+    dot.style.background = '#EF4444';
+    text.textContent = window.t ? window.t('sync_status_error') : '同步失败';
+    text.title = items.gistLastError || '';
+  } else if (items.gistStatus === 'synced') {
+    dot.style.background = '#10B981';
+    if (items.gistLastSyncAt) {
+      const d = new Date(items.gistLastSyncAt);
+      text.textContent = (window.t ? window.t('sync_status_synced') : '已同步') + ' ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+    } else {
+      text.textContent = window.t ? window.t('sync_status_synced') : '已同步';
+    }
+  } else {
+    dot.style.background = '#F59E0B';
+    text.textContent = window.t ? window.t('sync_status_pending') : '同步中...';
+  }
+}
+
 export let apiVerificationTimer = null;
+
+// Clear any pending verification
 export function updateApiStatusIndicator() {
   const dot = document.getElementById('api-status-dot');
   const textSpan = document.getElementById('api-status-text');
@@ -663,7 +774,6 @@ export function updateApiStatusIndicator() {
   const apiKey = document.getElementById('api-key-input').value.trim();
   const lang = document.getElementById('engine-language')?.value || 'en';
   
-  // Clear any pending verification
   if (apiVerificationTimer) clearTimeout(apiVerificationTimer);
   
   if (apiKey.length > 10) {

@@ -7,8 +7,13 @@ import { performTrustedClick } from './services/twitter.js';
 import { generateSingleTweetDraft, normalizeAgentMemory, mergeAgentMemory } from './core/automation.js';
 import { REPLY_RETRY_LOCK_MS, DEFAULT_AGENT_MEMORY, AGENT_MEMORY_LABELS, GROWTH_PLAYBOOKS, DEFAULT_INTERACTION_TARGETS, PROJECT_ACCOUNT_HANDLES, DEFAULT_DISCOVERY_KEYWORDS, selectGrowthPlaybook } from './core/constants.js';
 import { setupMessageRouter } from "./handlers/messageRouter.js";
+import { pullFromGist, pushToGist } from './core/syncLogic.js';
 
 console.log('[VibeX] ✅ Service Worker started successfully. All modules loaded.');
+
+let gistSyncTimer = null;
+const SYNC_KEYS = ['apiKey', 'apiProvider', 'aiModel', 'customPromptGlobal', 'petEnabled', 'accountBio', 'leadTarget', 'aiPersona', 'styleTrainingData', 'engineLanguage', 'replyStrategy', 'feedbackLoopData', 'collectedTweets', 'onboardingStrategy', 'targetUsers', 'competitorReport', 'agentMemory', 'smartTimeSlots', 'postsPerDay', 'postInterval', 'gistToken', 'gistId', 'gistAutoSync'];
+
 
 // background.js
 
@@ -29,11 +34,8 @@ console.log('[VibeX] ✅ Service Worker started successfully. All modules loaded
 // Auto-populate mock key and force-disable petEnabled for standard automation layout
 chrome.storage.local.get(['apiKey', 'petEnabled', 'collectedTweets'], (res) => {
   const updates = {};
-  if (!res.apiKey) {
-    updates.apiKey = 'mock-key-for-local-preview';
-  }
   if (!res.leadTarget) {
-    updates.leadTarget = 'Conflux Network (https://confluxnetwork.org)';
+    updates.leadTarget = 'VibeX Growth';
   }
   if (!res.collectedTweets) {
     updates.collectedTweets = [];
@@ -728,7 +730,7 @@ function handlePostCompleted(source) {
 
 async function generateAIResponse(tweetContent, replyContext = {}) {
   try {
-    const config = await getStorage(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal']);
+    const config = await getStorage(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal', 'aiPersona', 'accountBio', 'leadTarget']);
     if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = navigator.language.startsWith('zh') ? 'zh' : 'en';
     const errors = getConfigErrors(config);
     if (errors.length > 0) {
@@ -1463,6 +1465,18 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
+    const hasSyncKeyChanges = Object.keys(changes).some(k => SYNC_KEYS.includes(k));
+    if (hasSyncKeyChanges && !changes.gistLastSyncAt && !changes.gistStatus && !changes.gistLastError) {
+      chrome.storage.local.get(['gistToken', 'gistId', 'gistAutoSync'], (res) => {
+        if (res.gistAutoSync && res.gistToken) {
+          clearTimeout(gistSyncTimer);
+          gistSyncTimer = setTimeout(() => {
+            pushToGist(res.gistToken, res.gistId);
+          }, 10000);
+        }
+      });
+    }
+
     if (changes.accountBio && changes.accountBio.newValue) {
        addLog('info', '检测到主页简介更新，触发画像分析');
        analyzeAccountPersona(changes.accountBio.newValue);

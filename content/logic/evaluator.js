@@ -256,20 +256,34 @@ function collectTopicKeywords(state = {}) {
   const persona = state.aiPersona || {};
   const strategy = state.onboardingStrategy || {};
   const base = [
+    // English
     'ai', 'agent', 'chatgpt', 'claude', 'gemini', 'openai', 'llm', 'prompt',
     'automation', 'workflow', 'tool', 'startup', 'founder', 'indie', 'saas',
     'product', 'growth', 'marketing', 'monetization', 'mrr', 'build in public',
     'creator', 'research', 'investment', 'vc',
+    // Chinese
     '人工智能', '模型', '提示词', '自动化', '工作流', '工具', '创业', '创始人',
     '独立开发', '产品', '增长', '营销', '获客', '流量', '出海', '搞钱', '副业',
-    '变现', '商业化', '用户', '付费', '研究', '投资', '复盘'
+    '变现', '商业化', '用户', '付费', '研究', '投资', '复盘',
+    // Japanese
+    '人工知能', 'モデル', 'プロンプト', '自動化', 'ワークフロー', 'ツール', '起業', '創業者',
+    'インディー開発', '製品', '成長', 'マーケティング', '集客', 'トラフィック', 'マネタイズ',
+    '副業', '収益化', 'ユーザー', '支払い', '研究', '投資', '振り返り', 'スタートアップ',
+    // Spanish
+    'inteligencia artificial', 'modelo', 'automatización', 'flujo de trabajo', 'herramienta',
+    'emprendimiento', 'fundador', 'desarrollo independiente', 'producto', 'crecimiento',
+    'adquisición', 'tráfico', 'monetización', 'ingresos', 'usuarios', 'pago', 'investigación', 'inversión',
+    // Indonesian
+    'kecerdasan buatan', 'model', 'otomatisasi', 'alur kerja', 'alat', 'kewirausahaan', 'pendiri',
+    'pengembangan independen', 'produk', 'pertumbuhan', 'pemasaran', 'akuisisi', 'lalu lintas',
+    'monetisasi', 'pendapatan', 'pengguna', 'pembayaran', 'penelitian', 'investasi'
   ];
   const mapped = {
-    insights: ['观点', '趋势', '判断'],
-    playbooks: ['方法', '框架', '清单', '实操'],
-    stories: ['复盘', '经历', '故事'],
-    curation: ['报告', '信息', '新闻', '拆解'],
-    softPromo: ['产品', '工具', '案例']
+    insights: ['观点', '趋势', '判断', 'insights', 'trends', 'opinion', '見解', 'トレンド', '意見', 'perspectivas', 'tendencias', 'opinión', 'wawasan', 'tren', 'pendapat'],
+    playbooks: ['方法', '框架', '清单', '实操', 'playbook', 'framework', 'checklist', 'guide', '方法', 'フレームワーク', 'チェックリスト', 'ガイド', 'método', 'marco', 'lista', 'guía', 'metode', 'kerangka', 'daftar', 'panduan'],
+    stories: ['复盘', '经历', '故事', 'story', 'experience', 'review', 'ストーリー', '経験', '振り返り', 'historia', 'experiencia', 'revisión', 'cerita', 'pengalaman', 'ulasan'],
+    curation: ['报告', '信息', '新闻', '拆解', 'report', 'news', 'teardown', 'レポート', 'ニュース', '分解', 'reporte', 'noticias', 'desglose', 'laporan', 'berita', 'rincian'],
+    softPromo: ['产品', '工具', '案例', 'product', 'tool', 'case study', '製品', 'ツール', '事例', 'producto', 'herramienta', 'caso', 'produk', 'alat', 'kasus']
   };
   const configured = [
     persona.targetUsers,

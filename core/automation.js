@@ -1,5 +1,5 @@
 import { normalizeDraftQueue, queueNeedsNormalization } from '../utils/queueUtils.js';
-import { normalizeGeneratedTweets } from '../utils/scoreUtils.js';
+import { normalizeGeneratedTweets, totalViralScore, evaluateGeneratedTweets } from '../utils/scoreUtils.js';
 import { addLog, getConfigErrors, canAutoPublish } from './state.js';
 import { callLLM } from '../services/llm.js';
 import { DEFAULT_AGENT_MEMORY, selectGrowthPlaybook } from './constants.js';
@@ -60,7 +60,8 @@ async function generateSingleTweetDraft() {
   return new Promise((resolve, reject) => {
     chrome.storage.local.get([
       'apiKey', 'apiProvider', 'aiModel', 'isRunning',
-      'isGenerating', 'engineLanguage', 'accountBio', 'agentMemory', 'competitorReport', 'onboardingStrategy', 'leadTarget'
+      'isGenerating', 'engineLanguage', 'accountBio', 'agentMemory', 'competitorReport', 'onboardingStrategy', 'leadTarget',
+      'aiPersona', 'styleTrainingData'
     ], async (config) => {
       if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = 'zh';
       const errors = getConfigErrors(config);
@@ -74,7 +75,7 @@ async function generateSingleTweetDraft() {
       addLog('info', `正在即时生成推文...`);
       chrome.runtime.sendMessage({ action: "generationStatus", status: true }).catch(() => {});
       
-      const persona = {};
+      const persona = config.aiPersona || {};
       const memoryContext = "";
     const playbook = selectGrowthPlaybook({
       onboardingStrategy: config.onboardingStrategy,
@@ -85,6 +86,12 @@ async function generateSingleTweetDraft() {
     });
     const playbookContext = "";
     const reportContext = config.competitorReport ? `\n可用的流量操盘报告如下，必须严格吸收其中的钩子、矩阵和风险边界：\n${config.competitorReport}\n` : "";
+
+    let styleConstraint = '';
+    if (config.styleTrainingData && config.styleTrainingData.length > 0) {
+      const styleExamples = Array.isArray(config.styleTrainingData) ? config.styleTrainingData.join('\n---\n') : config.styleTrainingData;
+      styleConstraint = `\n【严格文风约束】：必须100%模仿以下参考素材的断句节奏、用词习惯（如特定语气词、emoji）、情绪饱和度以及排版结构。请提取并在输出中重现这种独特的个人风格，杜绝任何AI感。\n<文风参考>\n${styleExamples}\n</文风参考>\n\n`;
+    }
     
     const langConstraint = config.engineLanguage === 'en' ? '【语言约束】：必须使用英文 (English) 撰写内容。' :
                            config.engineLanguage === 'ja' ? '【语言约束】：必须使用日语 (Japanese) 撰写内容。' :
@@ -100,17 +107,17 @@ async function generateSingleTweetDraft() {
                                   config.engineLanguage === 'es' ? 'SPANISH (es)' :
                                   config.engineLanguage === 'id' ? 'INDONESIAN (id)' : 'CHINESE (zh)';
 
-    const prompt = `你是这个账号的 X 内容操盘手，目标不是“写得完整”，而是写出更像 X 原生内容、能被停留/转发/评论/关注的候选推文。
+    const prompt = `你是这个账号的 X 内容操盘手，目标不是"写得完整"，而是写出更像 X 原生内容、能被停留/转发/评论/关注的候选推文。
 你要像赛道里的内容操盘手，而不是公众号编辑、品牌公关或普通 AI 助手。
 
 账号简介：
 ${config.accountBio || '暂无'}
 
 账号画像定位：
-- 目标用户：${persona.targetUsers}
-- 发文特征与语气：${persona.characteristics}
-- 核心发文目标：${persona.goals}
-
+- 目标用户：${persona.targetUsers || '未填写'}
+- 账号人设与语气：${persona.characteristics || '未填写'}
+- 发推策略：${persona.goals || '未填写'}
+${styleConstraint}
 长期记忆，必须优先遵守：
 ${memoryContext}
 ${playbookContext}
@@ -186,24 +193,55 @@ You MUST write all generated text in ${outputLangInstruction}! Ignore all Chines
   ]
 }`;
     
-    try {
-      const generatedText = await callLLM(prompt, config, true);
-      // Clean up markdown code blocks if the model wrapped it
-      const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
-      const parsedTweets = JSON.parse(cleanJsonStr);
-      const newTweets = normalizeGeneratedTweets(parsedTweets).slice(0, 1);
-      
-      chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
-      if (newTweets.length > 0) {
-        resolve(newTweets[0].text);
-      } else {
-        addLog('warn', 'AI 未返回可用内容，跳过本次发推');
-        reject(new Error("No tweet returned"));
+    let lastFeedback = '';
+    const maxRetries = 5;
+    let bestAttempt = null;
+
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+      let currentPrompt = prompt;
+      if (lastFeedback) {
+        currentPrompt += `\n\n【系统拦截与打回重做要求】：\n上一轮生成的草稿未能通过质量审查，原因如下：\n"${lastFeedback}"\n请你深刻反思，并在这一轮生成中绝对避免上述问题，提供一条高质量的新推文。`;
       }
-    } catch (e) {
-      addLog('error', `推文生成失败: ${e.message}`);
-      chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
-      reject(e);
+      try {
+        const generatedText = await callLLM(currentPrompt, config, true);
+        const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
+        const parsedTweets = JSON.parse(cleanJsonStr);
+        
+        const evaluated = evaluateGeneratedTweets(parsedTweets);
+        if (evaluated.length === 0) {
+          lastFeedback = "未检测到有效文本内容，请确保在 JSON 中返回推文正文。";
+          continue;
+        }
+
+        const topCandidate = evaluated[0];
+        
+        // Save the best candidate seen so far (highest score)
+        if (!bestAttempt || topCandidate.score > bestAttempt.score) {
+          bestAttempt = topCandidate;
+        }
+
+        if (!topCandidate.qualityIssue) {
+          // Perfect candidate found
+          chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
+          return resolve(topCandidate.text);
+        } else {
+          // Has issues, feed back to next iteration
+          lastFeedback = topCandidate.qualityIssue;
+          // Silently retry in background
+        }
+      } catch (e) {
+        lastFeedback = "JSON解析失败或API调用异常，请确保严格按照要求输出纯JSON格式。";
+      }
+    }
+
+    chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
+    
+    // If we exhausted retries, try to return the best attempt we had, even with issues
+    if (bestAttempt && bestAttempt.text) {
+      return resolve(bestAttempt.text);
+    } else {
+      addLog('error', `推文生成彻底失败，经历多次重试仍无可用内容。最后反馈：${lastFeedback}`);
+      return reject(new Error("No valid tweet generated after retries"));
     }
     }); // Close chrome.storage.local.get
   }); // Close Promise

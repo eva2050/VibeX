@@ -339,12 +339,14 @@ function getButtonDisabledReason(button) {
   ].filter(Boolean).join(', ') || 'unknown';
 }
 
-function getPageText() {
-  return document.body?.innerText || '';
+function getToastOrAlertText() {
+  const toastText = document.querySelector('div[data-testid="toast"]')?.innerText || '';
+  const alertText = document.querySelector('div[role="alert"]')?.innerText || '';
+  return toastText + '\n' + alertText;
 }
 
 function getVisibleSendError() {
-  const text = getPageText();
+  const text = getToastOrAlertText();
   const patterns = [
     /Something went wrong[^。\n]*/i,
     /Whoops[^。\n]*/i,
@@ -362,7 +364,7 @@ function getVisibleSendError() {
 }
 
 function getDuplicateSendSignal() {
-  const text = getPageText();
+  const text = getToastOrAlertText();
   const patterns = [
     /You already said that[^。\n]*/i,
     /You already posted that[^。\n]*/i,
@@ -377,7 +379,7 @@ function getDuplicateSendSignal() {
 }
 
 function hasSendSuccessSignal() {
-  return /Your (post|tweet|reply) was sent|Your post has been sent|Your Tweet has been sent|Post sent|Tweet sent|Reply sent|Post scheduled|Tweet scheduled|Your post was scheduled|Your Tweet was scheduled|你的帖子已发送|你的回复已发送|帖子已发送|回复已发送|已发送你的帖子|已发送你的回复|帖子已定时|推文已定时|已定时发送|已安排发送|已预定发布/i.test(getPageText());
+  return /Your (post|tweet|reply) was sent|Your post has been sent|Your Tweet has been sent|Post sent|Tweet sent|Reply sent|Post scheduled|Tweet scheduled|Your post was scheduled|Your Tweet was scheduled|你的帖子已发送|你的回复已发送|帖子已发送|回复已发送|已发送你的帖子|已发送你的回复|帖子已定时|推文已定时|已定时发送|已安排发送|已预定发布/i.test(getToastOrAlertText());
 }
 
 async function waitForElement(getter, timeout = 8000, interval = 250) {
@@ -403,11 +405,23 @@ async function waitForEnabledButton(getter, timeout = 10000, interval = 500) {
 }
 
 function isLoggedOutOrBlocked() {
-  const bodyText = document.body?.innerText || '';
-  return (
-    document.querySelector('a[href="/login"], a[href="/i/flow/login"]') ||
-    /Sign in to X|Log in to X|登录 X|登录到 X|Something went wrong|出错了|验证码|Verify your identity|Confirm your identity|验证你的身份|需要验证|captcha/i.test(bodyText)
-  );
+  if (document.querySelector('a[href="/login"], a[href="/i/flow/login"]')) return true;
+  if (document.querySelector('iframe[src*="arkoselabs.com"], iframe[src*="FunCaptcha"], iframe[id^="arkose_iframe"]')) return true;
+
+  const layersText = document.getElementById('layers')?.innerText || '';
+  const errorDetailText = document.querySelector('div[data-testid="error-detail"]')?.innerText || '';
+  const emptyStateText = document.querySelector('div[data-testid="emptyState"]')?.innerText || '';
+  
+  // We only check for hard blocks here, not transient errors like "Something went wrong" toasts.
+  // Those are handled by getVisibleSendError() during the posting flow.
+  let textToCheck = errorDetailText + '\n' + emptyStateText;
+  
+  // If there's no editor or tweet in layers, the layers might contain a captcha or block modal.
+  if (!document.querySelector('#layers div[data-testid^="tweetTextarea"]') && !document.querySelector('#layers article[data-testid="tweet"]')) {
+    textToCheck += '\n' + layersText;
+  }
+
+  return /Sign in to X|Log in to X|登录 X|登录到 X|验证码|Verify your identity|Confirm your identity|验证你的身份|需要验证|captcha/i.test(textToCheck);
 }
 
 async function startIntentReplyFlow({ statusId, replyText, tweetAuthor, tweetContent, reason }) {
@@ -482,7 +496,7 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       const replyIconBtn = tweetNode.querySelector('[data-testid="reply"]');
       if (replyIconBtn) {
         addLog('info', `尝试在当前页面原生弹窗回复 @${author}`);
-        simulateRealClick(replyIconBtn);
+        await clickElementReliably(replyIconBtn, '原生回复图标');
         const draftEditor = await waitForElement(() => {
           const dialog = findActiveDialog();
           return dialog ? findTweetEditor(dialog) : null;
@@ -520,10 +534,8 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
             }
           }
           
-          // Close the modal if we failed so we can fallback
-          const closeBtn = findCloseDialogButton(findActiveDialog());
-          if (closeBtn) simulateRealClick(closeBtn);
-          await sleep(1000);
+          // Close the modal and discard draft if we failed so we can fallback cleanly
+          await closeOpenComposerBeforeNavigation('清理原生回复异常草稿');
         }
       }
     }
@@ -555,7 +567,7 @@ async function simulateLikeAndRetweet(tweetNode, mode) {
     if (Math.random() > 0.5 || now - lastLikeTime > 60 * 60000) {
       const likeBtn = tweetNode.querySelector('[data-testid="like"]');
       if (likeBtn) {
-        simulateRealClick(likeBtn);
+        await clickElementReliably(likeBtn, '自动点赞');
         addLog('info', '自动点赞触发');
         chrome.storage.local.set({ lastLikeTime: now });
         await sleep(Math.floor(Math.random() * 800) + 500);
@@ -569,7 +581,7 @@ async function simulateLikeAndRetweet(tweetNode, mode) {
     if (now - lastRtTime > minRtWait) {
       const rtBtn = tweetNode.querySelector('[data-testid="retweet"]');
       if (rtBtn) {
-        simulateRealClick(rtBtn);
+        await clickElementReliably(rtBtn, '自动转推');
         addLog('info', '自动转推触发');
         chrome.storage.local.set({ lastRtTime: now });
         await sleep(Math.floor(Math.random() * 500) + 300);
@@ -577,7 +589,7 @@ async function simulateLikeAndRetweet(tweetNode, mode) {
         // Wait for dropdown and click confirm
         const rtConfirm = document.querySelector('[data-testid="retweetConfirm"]');
         if (rtConfirm) {
-          simulateRealClick(rtConfirm);
+          await clickElementReliably(rtConfirm, '确认转推');
         }
         await sleep(Math.floor(Math.random() * 800) + 500);
       }
@@ -787,6 +799,10 @@ async function waitForIntentSendOutcome(expectedText, timeout = 18000) {
     const error = getVisibleSendError();
     if (error) {
       return { status: 'failed', reason: error };
+    }
+
+    if (isLoggedOutOrBlocked()) {
+      return { status: 'failed', reason: '触发了机器验证 (Captcha) 或被限制拦截，发送失败' };
     }
 
     if (hasSendSuccessSignal()) {
@@ -1045,9 +1061,14 @@ async function handlePendingReply() {
         actualText = getEditorText(draftEditor);
       }
 
-      if (actualText !== expectedText) {
-        pauseAutomation(`X intent 回复文本校验失败，已暂停。期望「${expectedText.substring(0, 40)}...」，实际「${actualText.substring(0, 40)}...」`);
-        return;
+      // Relaxed validation: X may format URLs, emojis, or spaces differently.
+      // We check if actualText has substantial content. If it's mostly empty, it failed.
+      const isValidationFailed = actualText.length < Math.min(expectedText.length * 0.5, 5);
+      
+      if (isValidationFailed) {
+        addLog('warn', `X intent 回复文本校验严重不匹配。期望「${expectedText.substring(0, 40)}...」，实际「${actualText.substring(0, 40)}...」`);
+        await closeOpenComposerBeforeNavigation('清理残留幽灵草稿');
+        throw new Error('预填文本校验严重不匹配，已自动清理残留草稿，等待下一轮重试');
       }
 
       let sendBtn = await waitForEnabledButton(() => {
@@ -1176,8 +1197,20 @@ async function handlePendingPost() {
       }
 
       if (actualText !== expectedText) {
-        pauseAutomation(`预填文本校验失败，已暂停。期望「${expectedText.substring(0, 40)}...」，实际「${actualText.substring(0, 40)}...」`);
-        return;
+        addLog('warn', 'X intent 未完成预填，尝试一次真实编辑器输入');
+        await simulateTyping(draftEditor, postText);
+        await sleep(1200);
+        actualText = getEditorText(draftEditor);
+      }
+
+      // Relaxed validation: X may format URLs, emojis, or spaces differently.
+      // We check if actualText has substantial content. If it's mostly empty, it failed.
+      const isValidationFailed = actualText.length < Math.min(expectedText.length * 0.5, 5);
+      
+      if (isValidationFailed) {
+        addLog('warn', `预填文本校验严重不匹配。期望「${expectedText.substring(0, 40)}...」，实际「${actualText.substring(0, 40)}...」`);
+        await closeOpenComposerBeforeNavigation('清理残留幽灵草稿');
+        throw new Error('预填文本校验严重不匹配，已自动清理残留草稿，等待下一轮重试');
       }
 
       addLog('success', `推文文本校验通过 (${postText.length} 字)`);
@@ -1257,6 +1290,10 @@ async function handlePendingPost() {
       consecutiveFailures++;
       addLog('error', `定时发文异常: ${e.message} (连续失败 ${consecutiveFailures} 次)`);
       checkAndPause();
+      if (consecutiveFailures < 2) {
+        addLog('info', '等待 5 秒后在当前页面执行本地重试...');
+        setTimeout(handlePendingPost, 5000);
+      }
     } finally {
       chrome.storage.local.set({ isTyping: false });
       isAutomatorBusy = false;
