@@ -736,30 +736,25 @@ export function applyTheme(theme) {
 }
 
 export function updateGistStatusUI(items) {
-  const dot = document.getElementById('gist-status-dot');
   const text = document.getElementById('gist-status-text');
-  if (!dot || !text) return;
+  if (!text) return;
   
   text.removeAttribute('data-i18n');
   
   if (!items.gistToken) {
-    dot.style.background = '#888';
-    text.textContent = window.t ? window.t('sync_status_unconfigured') : '未配置';
+    text.textContent = t('sync_status_unconfigured', '未配置');
   } else if (items.gistStatus === 'error') {
-    dot.style.background = '#EF4444';
-    text.textContent = window.t ? window.t('sync_status_error') : '同步失败';
+    text.textContent = t('sync_status_error', '同步失败');
     text.title = items.gistLastError || '';
   } else if (items.gistStatus === 'synced') {
-    dot.style.background = '#10B981';
     if (items.gistLastSyncAt) {
       const d = new Date(items.gistLastSyncAt);
-      text.textContent = (window.t ? window.t('sync_status_synced') : '已同步') + ' ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+      text.textContent = t('sync_status_synced', '已同步') + ' ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
     } else {
-      text.textContent = window.t ? window.t('sync_status_synced') : '已同步';
+      text.textContent = t('sync_status_synced', '已同步');
     }
   } else {
-    dot.style.background = '#F59E0B';
-    text.textContent = window.t ? window.t('sync_status_pending') : '同步中...';
+    text.textContent = t('sync_status_pending', '同步中...');
   }
 }
 
