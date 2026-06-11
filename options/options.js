@@ -1,5 +1,5 @@
 import { getCurrentLang, t, translateBackendLog, applyLanguage } from './ui/i18n.js';
-import { renderLogs, addLog, renderVault } from './ui/logs.js';
+import { renderLogs, addLog, renderVault, renderAiMemory } from './ui/logs.js';
 import { loadMemory, saveMemory, bindActions, updatePreflightStatus, updateEngineBadge, addStyleItem, setupCustomSelects, applyTheme, updateApiStatusIndicator, resetCustomPrompt, updateGistStatusUI } from './ui/settings.js';
 
 /**
@@ -220,6 +220,14 @@ function setupStorageListener() {
       }
       if (changes.draftVault) {
         renderVault(changes.draftVault.newValue);
+        chrome.storage.local.get({ aiMemory: { learnedRules: [] } }, (res) => {
+          renderAiMemory(res.aiMemory, changes.draftVault.newValue);
+        });
+      }
+      if (changes.aiMemory) {
+        chrome.storage.local.get({ draftVault: [] }, (res) => {
+          renderAiMemory(changes.aiMemory.newValue, res.draftVault);
+        });
       }
       if (changes.gistStatus || changes.gistLastSyncAt || changes.gistLastError || changes.gistToken || changes.gistAutoSync) {
         chrome.storage.local.get(['gistToken', 'gistStatus', 'gistLastSyncAt', 'gistLastError'], (res) => {
@@ -302,6 +310,18 @@ export function executeMagicAction(actionType, isRegenerate = false) {
   // Clear like/dislike feedback button states on new generation
   document.getElementById('btn-feedback-like')?.classList.remove('active', 'primary');
   document.getElementById('btn-feedback-dislike')?.classList.remove('active', 'primary');
+  const saveLibraryBtn = document.getElementById('btn-save-library');
+  if (saveLibraryBtn) {
+    saveLibraryBtn.textContent = '';
+    const saveIcon = document.createElement('i');
+    saveIcon.dataset.lucide = 'bookmark';
+    saveIcon.setAttribute('width', '18');
+    saveIcon.setAttribute('height', '18');
+    saveLibraryBtn.appendChild(saveIcon);
+    saveLibraryBtn.setAttribute('aria-label', t('btn_save', 'Save'));
+    saveLibraryBtn.title = t('btn_save', 'Save');
+    if (window.lucide) window.lucide.createIcons({ root: saveLibraryBtn });
+  }
   
   zone.classList.remove('hidden');
   loader.classList.remove('hidden');
@@ -375,7 +395,8 @@ function saveToVault(generatedText, originalOutput = '') {
       source: currentContext?.data?.text || '未知来源',
       savedAt: Date.now()
     });
-    chrome.storage.local.set({ draftVault: vault }, () => {
+    const trimmedVault = vault.slice(0, 100);
+    chrome.storage.local.set({ draftVault: trimmedVault }, () => {
       addLog(`✨ ${t('log_auto_saved')}`, 'system');
       // Toast notification instead of button modification
       const toast = document.createElement('div');
@@ -384,7 +405,7 @@ function saveToVault(generatedText, originalOutput = '') {
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 2000);
       
-      renderVault(vault);
+      renderVault(trimmedVault);
     });
   });
 }
@@ -445,10 +466,6 @@ if (window.matchMedia) {
     }
   });
 }
-
-
-
-
 
 
 

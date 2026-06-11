@@ -4,7 +4,7 @@ import { addLog } from './state.js';
 const SYNC_KEYS = [
   'apiKey', 'apiProvider', 'aiModel', 'customPromptGlobal', 'petEnabled',
   'accountBio', 'leadTarget', 'aiPersona', 'styleTrainingData',
-  'engineLanguage', 'replyStrategy', 'feedbackLoopData', 'collectedTweets',
+  'engineLanguage', 'replyStrategy', 'feedbackLoopData', 'aiMemory', 'collectedTweets',
   'onboardingStrategy', 'targetUsers', 'competitorReport', 'agentMemory', 'smartTimeSlots', 'postsPerDay', 'postInterval'
 ];
 

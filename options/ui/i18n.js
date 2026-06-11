@@ -1,4 +1,4 @@
-import { renderVault } from './logs.js';
+import { renderVault, renderAiMemory } from './logs.js';
 
 // Fragment dictionary: short Chinese terms → target language
 // These are applied as global string replacements, no regex magic needed.
@@ -168,8 +168,9 @@ export function applyLanguage(lang) {
   
   // Re-render vault with translated buttons/dates
   if (typeof chrome !== 'undefined' && chrome.storage) {
-    chrome.storage.local.get({ draftVault: [] }, (items) => {
+    chrome.storage.local.get({ draftVault: [], aiMemory: { learnedRules: [] } }, (items) => {
       renderVault(items.draftVault);
+      renderAiMemory(items.aiMemory, items.draftVault);
     });
   }
   

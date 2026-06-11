@@ -45,7 +45,7 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
     return true;
   } else if (request.action === "magicPrompt" || request.action === "extractAndRewrite") {
     const executeMagicPromptCore = (req, textToProcess, senderTab) => {
-      chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal', 'aiPersona'], (config) => {
+      chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'styleTrainingData', 'engineLanguage', 'feedbackLoopData', 'replyStrategy', 'customPromptGlobal', 'aiPersona', 'aiMemory'], (config) => {
         if (!config.apiKey || config.apiKey.trim() === '' || config.apiKey.startsWith('mock-')) {
           sendResponse({ success: false, error: 'ERR_MISSING_API_KEY' });
           return;
@@ -146,6 +146,12 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
           const dislikes = config.feedbackDislikes.map((fb, idx) => `[反面案例 ${idx+1}]\n${fb.text}`).join('\n\n');
           preferenceConstraint += `\n【反面偏好】：用户非常讨厌以下输出的风格，在这次生成中**坚决避免**使用这种语气、句式或套路：\n<反面案例>\n${dislikes}\n</反面案例>\n`;
         }
+
+        let performanceMemoryConstraint = '';
+        const learnedRules = Array.isArray(config.aiMemory?.learnedRules) ? config.aiMemory.learnedRules : [];
+        if (learnedRules.length > 0 && req.promptType === 'viral_rewrite') {
+          performanceMemoryConstraint = `\n【发布表现记忆】：以下规则来自用户过往 X post 的预测浏览量与实际浏览量偏差，请在这次重写时优先遵守，用它们修正选题、hook 和表达方式：\n${learnedRules.slice(0, 5).map((rule, idx) => `${idx + 1}. ${rule.text || rule}`).join('\n')}\n`;
+        }
         
         let langConstraint = '';
         const baseLangConstraint = () => {
@@ -205,7 +211,7 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
           regenerateConstraint = `\n\n【用户反馈 - 重新生成指令】：注意！用户点击了“重新生成”，这说明你上一次生成的文案**非常不符合预期，导致用户完全不想使用甚至懒得修改**。请你立刻反思，抛弃上一版的切入点、废话和毫无新意的逻辑，尝试换一个完全不同的、更新颖的、更一针见血的角度来进行本次生成！`;
         }
 
-        callLLM(promptPrefix + timeContext + langConstraint + styleConstraint + feedbackConstraint + preferenceConstraint + strictAntiAI + regenerateConstraint + '\n\n待处理文本：\n' + textToProcess, config, false, (chunk) => {
+        callLLM(promptPrefix + timeContext + langConstraint + styleConstraint + feedbackConstraint + preferenceConstraint + performanceMemoryConstraint + strictAntiAI + regenerateConstraint + '\n\n待处理文本：\n' + textToProcess, config, false, (chunk) => {
           if (senderTab && senderTab.id) {
             chrome.tabs.sendMessage(senderTab.id, { action: 'magicPromptStreamChunk', chunk: chunk }).catch(()=>null);
           } else {

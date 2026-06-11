@@ -1,5 +1,5 @@
 import { applyLanguage, t, getCurrentLang } from './i18n.js';
-import { renderVault, addLog, renderLogs } from './logs.js';
+import { renderVault, addLog, renderLogs, renderAiMemory } from './logs.js';
 import { executeMagicAction, currentContext, setCurrentContext, lastActionType, showToast, setOriginalAIOutput } from '../options.js';
 
 export function updatePreflightStatus(apiKey) {
@@ -46,6 +46,7 @@ export function loadMemory() {
     engineLanguage: 'en',
     uiTheme: 'auto',
     draftVault: [],
+    aiMemory: { learnedRules: [] },
     onboardingStrategy: {},
     aiPersona: {},
     gistToken: '',
@@ -201,6 +202,7 @@ export function loadMemory() {
     
     updatePreflightStatus(items.apiKey);
     renderVault(items.draftVault);
+    renderAiMemory(items.aiMemory, items.draftVault);
     
     // Update stats
     chrome.storage.local.get(['postsToday', 'lastPostDate', 'repliesToday', 'lastReplyDate'], (res) => {
@@ -433,26 +435,18 @@ export function bindActions() {
           author: 'Manual Rewrite',
           savedAt: Date.now()
         });
-        chrome.storage.local.set({ draftVault: vault }, () => {
-          renderVault(vault);
-          const oldText = btnSaveLib.textContent;
+        const trimmedVault = vault.slice(0, 100);
+        chrome.storage.local.set({ draftVault: trimmedVault }, () => {
+          renderVault(trimmedVault);
           btnSaveLib.textContent = '';
           const i = document.createElement('i');
           i.dataset.lucide = 'check';
-          i.setAttribute('width', '16');
-          i.setAttribute('height', '16');
+          i.setAttribute('width', '18');
+          i.setAttribute('height', '18');
           btnSaveLib.appendChild(i);
-          btnSaveLib.appendChild(document.createTextNode(' ' + t('toast_saved').replace('✨ ', '')));
+          btnSaveLib.setAttribute('aria-label', t('toast_saved').replace('✨ ', ''));
+          btnSaveLib.title = t('toast_saved').replace('✨ ', '');
           if (window.lucide) window.lucide.createIcons();
-          setTimeout(() => { 
-            btnSaveLib.textContent = oldText;
-            const originalIcon = document.createElement('i');
-            originalIcon.dataset.lucide = 'download';
-            originalIcon.setAttribute('width', '16');
-            originalIcon.setAttribute('height', '16');
-            btnSaveLib.insertBefore(originalIcon, btnSaveLib.firstChild);
-            if (window.lucide) window.lucide.createIcons();
-          }, 2000);
         });
       });
     });
@@ -593,7 +587,7 @@ export function addStyleItem(text = '', container = null) {
   div.style.position = 'relative';
   
   const textarea = document.createElement('textarea');
-  textarea.className = 'modern-input style-item-textarea';
+  textarea.className = 'modern-input user-config-input style-item-textarea';
   textarea.style.resize = 'none';
   textarea.rows = 1;
   textarea.style.height = '36px';
@@ -609,8 +603,8 @@ export function addStyleItem(text = '', container = null) {
   textarea.style.overflow = 'hidden';
   textarea.style.whiteSpace = 'nowrap';
   textarea.style.textOverflow = 'ellipsis';
-  textarea.style.color = '#86868b'; // Gray text when collapsed
-  textarea.style.fontSize = '13px'; // Smaller text when collapsed
+  textarea.style.color = 'var(--text-sub)';
+  textarea.style.fontSize = '12px';
   
   textarea.addEventListener('focus', () => {
     mask.style.display = 'none';
@@ -619,8 +613,8 @@ export function addStyleItem(text = '', container = null) {
     textarea.style.resize = 'vertical';
     textarea.style.overflow = 'auto';
     textarea.style.whiteSpace = 'normal';
-    textarea.style.color = 'var(--text-main)'; // Restore color
-    textarea.style.fontSize = ''; // Restore font size
+    textarea.style.color = 'var(--text-sub)';
+    textarea.style.fontSize = '12px';
     textarea.style.paddingTop = '14px';
     textarea.style.paddingBottom = '14px';
   });
@@ -632,8 +626,8 @@ export function addStyleItem(text = '', container = null) {
     textarea.style.resize = 'none';
     textarea.style.overflow = 'hidden';
     textarea.style.whiteSpace = 'nowrap';
-    textarea.style.color = '#86868b'; // Gray text
-    textarea.style.fontSize = '13px'; // Smaller text
+    textarea.style.color = 'var(--text-sub)';
+    textarea.style.fontSize = '12px';
     textarea.style.paddingTop = '8px';
     textarea.style.paddingBottom = '8px';
     textarea.scrollTop = 0;

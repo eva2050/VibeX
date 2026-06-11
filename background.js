@@ -12,7 +12,7 @@ import { pullFromGist, pushToGist } from './core/syncLogic.js';
 console.log('[VibeX] ✅ Service Worker started successfully. All modules loaded.');
 
 let gistSyncTimer = null;
-const SYNC_KEYS = ['apiKey', 'apiProvider', 'aiModel', 'customPromptGlobal', 'petEnabled', 'accountBio', 'leadTarget', 'aiPersona', 'styleTrainingData', 'engineLanguage', 'replyStrategy', 'feedbackLoopData', 'collectedTweets', 'onboardingStrategy', 'targetUsers', 'competitorReport', 'agentMemory', 'smartTimeSlots', 'postsPerDay', 'postInterval', 'gistToken', 'gistId', 'gistAutoSync'];
+const SYNC_KEYS = ['apiKey', 'apiProvider', 'aiModel', 'customPromptGlobal', 'petEnabled', 'accountBio', 'leadTarget', 'aiPersona', 'styleTrainingData', 'engineLanguage', 'replyStrategy', 'feedbackLoopData', 'aiMemory', 'collectedTweets', 'onboardingStrategy', 'targetUsers', 'competitorReport', 'agentMemory', 'smartTimeSlots', 'postsPerDay', 'postInterval', 'gistToken', 'gistId', 'gistAutoSync'];
 
 
 // background.js

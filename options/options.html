@@ -30,8 +30,8 @@
       <section id="view-insight" class="view-panel is-active">
         
         <div class="brain-header">
-          <h2><i data-lucide="terminal" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_workspace">工作区</span></h2>
-          <p data-i18n="desc_workspace">在此输入灵感、长文、或公众号/小红书/YouTube链接，体验一键爆款仿写。</p>
+          <h2><i data-lucide="terminal" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_workspace">Studio</span></h2>
+          <p data-i18n="desc_workspace">Turn ideas, articles, or links into X-ready posts.</p>
         </div>
 
         <div style="margin-top: 16px; margin-bottom: 24px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 24px; box-shadow: var(--shadow-sm); display: flex; align-items: flex-end; padding: 6px 6px 6px 16px; transition: all 0.2s; cursor: text;" onclick="document.getElementById('manual-input').focus()">
@@ -47,18 +47,18 @@
             <div class="scan-line"></div>
           </div>
           <div id="generation-result" class="hover-copy-card hidden" title="点击复制文案" data-i18n-title="hint_click_copy" data-copy-hint="点击即可复制" data-i18n-attr="data-copy-hint:hint_click_copy"></div>
-          <div style="display: flex; gap: 6px; margin-top: 16px;">
-              <button class="magic-btn outline" id="btn-feedback-like" style="flex: 0 0 40px; padding: 0; display: flex; align-items: center; justify-content: center;" title="点赞：多生成这种风格" data-i18n-title="btn_like">
+          <div class="generation-actions">
+              <button class="magic-btn outline icon-only-action" id="btn-feedback-like" title="点赞：多生成这种风格" data-i18n-title="btn_like" aria-label="Like">
                 <i data-lucide="thumbs-up" width="18" height="18"></i>
               </button>
-              <button class="magic-btn outline" id="btn-feedback-dislike" style="flex: 0 0 40px; padding: 0; display: flex; align-items: center; justify-content: center;" title="踩：讨厌这种风格" data-i18n-title="btn_dislike">
+              <button class="magic-btn outline icon-only-action" id="btn-feedback-dislike" title="踩：讨厌这种风格" data-i18n-title="btn_dislike" aria-label="Dislike">
                 <i data-lucide="thumbs-down" width="18" height="18"></i>
               </button>
-              <button class="magic-btn outline" id="btn-regenerate" style="flex: 1; padding-left: 8px; padding-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                <i data-lucide="refresh-cw" width="16" height="16" style="flex-shrink: 0;"></i> <span data-i18n="btn_regenerate" style="overflow: hidden; text-overflow: ellipsis;">重新生成</span>
+              <button class="magic-btn outline icon-only-action" id="btn-regenerate" title="Regenerate" data-i18n-title="btn_regenerate" aria-label="Regenerate">
+                <i data-lucide="refresh-cw" width="18" height="18"></i>
               </button>
-              <button class="magic-btn outline" id="btn-save-library" style="flex: 1; padding-left: 8px; padding-right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                <i data-lucide="bookmark" width="16" height="16" style="flex-shrink: 0;"></i> <span data-i18n="btn_save" style="overflow: hidden; text-overflow: ellipsis;">保存</span>
+              <button class="magic-btn outline icon-only-action" id="btn-save-library" title="Save" data-i18n-title="btn_save" aria-label="Save">
+                <i data-lucide="bookmark" width="18" height="18"></i>
               </button>
             </div>
         </div>
@@ -67,27 +67,58 @@
       <!-- 2. Library -->
       <section id="view-library" class="view-panel hidden">
         <div class="brain-header">
-          <h2><i data-lucide="library" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_library">素材库</span> <span id="library-count" style="font-size: 18px; color: var(--text-sub); font-weight: 500; margin-left: 6px;">(0)</span></h2>
-          <p data-i18n="desc_library">您可以在这里直接编辑修改文案，系统会自动将您的修改作为二次反馈喂给 AI，让 AI 不断进化，越来越懂你的风格。</p>
+          <h2><i data-lucide="library" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_library">Posts</span> <span id="library-count" style="font-size: 18px; color: var(--text-sub); font-weight: 500; margin-left: 6px;">(0)</span></h2>
+          <p data-i18n="desc_library">Saved posts, predicted reach, actual views, and AI learning live here.</p>
         </div>
         
         <div id="library-feed" class="masonry-feed" style="margin-top: 16px;"></div>
       </section>
 
-      <!-- 3. Personalization -->
+      <!-- 3. Learning -->
+      <section id="view-learning" class="view-panel hidden">
+        <div class="brain-header">
+          <h2><i data-lucide="brain" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_learning">Learning</span></h2>
+          <p data-i18n="desc_learning">Review what VibeX learned from prediction gaps and whether it is getting sharper.</p>
+        </div>
+
+        <div class="learning-stats">
+          <div class="learning-stat">
+            <span data-i18n="learning_reviewed">Reviewed</span>
+            <strong id="learning-reviewed-count">0</strong>
+          </div>
+          <div class="learning-stat">
+            <span data-i18n="learning_accuracy">Accuracy</span>
+            <strong id="learning-accuracy">-</strong>
+          </div>
+          <div class="learning-stat">
+            <span data-i18n="learning_rules">Rules</span>
+            <strong id="learning-rules-count">0</strong>
+          </div>
+        </div>
+
+        <div class="learning-section">
+          <div class="learning-section-title">
+            <i data-lucide="list-checks" width="16" height="16"></i>
+            <span data-i18n="learning_active_rules">Active Rules</span>
+          </div>
+          <div id="ai-memory-list" class="ai-memory-list"></div>
+        </div>
+      </section>
+
+      <!-- 4. Personalization -->
       <section id="view-persona" class="view-panel hidden">
         <div class="brain-header">
-          <h2><i data-lucide="user" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_customization">个性化</span></h2>
-          <p data-i18n="desc_customization">定义您的人设、发推策略及回复风格。</p>
+          <h2><i data-lucide="user" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_customization">Profile</span></h2>
+          <p data-i18n="desc_customization">Define your account profile, posting strategy, and reply style.</p>
         </div>
 
         <div class="glass-form" style="margin-top: 16px; border: none; background: transparent; padding: 0; box-shadow: none;">
           <label><i data-lucide="user-check" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_persona">账号人设</span></label>
-          <textarea id="custom-persona" class="modern-input" data-i18n-placeholder="placeholder_persona" style="min-height: 80px; resize: vertical; padding: 12px; font-size: 13px;" placeholder="例如：资深产品经理，讲话一针见血，喜欢分享干货..."></textarea>
+          <textarea id="custom-persona" class="modern-input user-config-input" data-i18n-placeholder="placeholder_persona" placeholder="例如：资深产品经理，讲话一针见血，喜欢分享干货..."></textarea>
 
           <label><i data-lucide="target" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_tweeting_strategy">发推策略</span></label>
-          <textarea id="custom-tweeting-strategy" class="modern-input" data-i18n-placeholder="placeholder_tweeting_strategy" style="min-height: 80px; resize: vertical; padding: 12px; font-size: 13px;" placeholder="例如：每天分享一条硅谷出海见闻，语气幽默自嘲..."></textarea>
-          
+          <textarea id="custom-tweeting-strategy" class="modern-input user-config-input" data-i18n-placeholder="placeholder_tweeting_strategy" placeholder="例如：每天分享一条硅谷出海见闻，语气幽默自嘲..."></textarea>
+
           <label><i data-lucide="message-square" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_strategy">回复策略</span></label>
           <div class="custom-select-container" id="reply-strategy-container">
             <input type="hidden" id="reply-strategy" value="极简流：精辟吐槽 / 玩梗">
@@ -110,7 +141,7 @@
                 <i data-lucide="rotate-ccw" width="12" height="12"></i> <span data-i18n="btn_reset_prompt">Reset</span>
               </button>
             </div>
-            <textarea id="custom-strategy-prompt" class="modern-input" style="min-height: 100px; resize: vertical; padding: 12px; font-size: 13px; font-family: monospace;" data-i18n-placeholder="placeholder_custom_prompt" placeholder="在这里写入你完全自定义的 System Prompt..."></textarea>
+            <textarea id="custom-strategy-prompt" class="modern-input user-config-input prompt-config-input" data-i18n-placeholder="placeholder_custom_prompt" placeholder="在这里写入你完全自定义的 System Prompt..."></textarea>
           </div>
 
           <label><i data-lucide="book-open" width="16" height="16" style="color: var(--text-sub);"></i> <span data-i18n="label_style">风格训练语料</span></label>
@@ -187,7 +218,7 @@
       <!-- 4. Agents -->
       <section id="view-engine" class="view-panel hidden">
         <div class="engine-header">
-          <h2><i data-lucide="bot" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_engine">自动化</span></h2>
+          <h2><i data-lucide="bot" width="28" height="28" style="color: var(--text-sub);"></i> <span data-i18n="header_engine">Automation</span></h2>
           
           <div style="margin-top: 16px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -246,23 +277,25 @@
     <nav class="flat-nav">
       <button class="nav-item active" data-view="view-insight">
         <i data-lucide="terminal" class="nav-icon" width="20" height="20"></i>
-        <span class="nav-label" data-i18n="nav_workspace">工作区</span>
+        <span class="nav-label" data-i18n="nav_workspace">Studio</span>
       </button>
       <button class="nav-item" data-view="view-library">
         <i data-lucide="library" class="nav-icon" width="20" height="20"></i>
-        <span class="nav-label" data-i18n="nav_library">素材库</span>
+        <span class="nav-label" data-i18n="nav_library">Posts</span>
+      </button>
+      <button class="nav-item" data-view="view-learning">
+        <i data-lucide="brain" class="nav-icon" width="20" height="20"></i>
+        <span class="nav-label" data-i18n="nav_learning">Loop</span>
       </button>
       <button class="nav-item" data-view="view-engine">
         <i data-lucide="bot" class="nav-icon" width="20" height="20"></i>
-        <span class="nav-label" data-i18n="nav_engine">自动化</span>
+        <span class="nav-label" data-i18n="nav_engine">Auto</span>
       </button>
-      <button class="nav-item" data-view="view-persona">
-        <i data-lucide="user" class="nav-icon" width="20" height="20"></i>
-        <span class="nav-label" data-i18n="nav_customization">个性化</span>
-      </button>
-      <button class="nav-item" data-view="view-settings">
+      <button class="nav-item" data-view="view-settings" style="margin-top: auto;" title="设置" data-i18n-title="nav_settings">
         <i data-lucide="settings" class="nav-icon" width="20" height="20"></i>
-        <span class="nav-label" data-i18n="nav_settings">设置</span>
+      </button>
+      <button class="nav-item" data-view="view-persona" title="Profile" data-i18n-title="nav_customization">
+        <i data-lucide="user" class="nav-icon" width="20" height="20"></i>
       </button>
     </nav>
   </div>
