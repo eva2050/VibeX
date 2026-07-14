@@ -7,7 +7,7 @@ import { performTrustedClick } from './services/twitter.js';
 import { connectXWithOAuth, getXOAuthRequestPreview, normalizeXAuth } from './services/xApi.js';
 import { generateSingleTweetDraft, normalizeAgentMemory, mergeAgentMemory } from './core/automation.js';
 import { buildGenerationContext } from './core/generationContext.js';
-import { POST_CONTENT_MODE, POST_ORIGIN, POST_STATUS, STORAGE_SCHEMA_VERSION, normalizeAiMemory, normalizePostRecord } from './core/storageSchema.js';
+import { POST_CONTENT_MODE, POST_ORIGIN, POST_STATUS, STORAGE_SCHEMA_VERSION, migrateStoragePayload, normalizeAiMemory, normalizePostRecord } from './core/storageSchema.js';
 import { applyPerformanceReview, buildAccountPerformanceBaseline, updateAiMemoryWithReviewedPost } from './core/performanceLoop.js';
 import { DEFAULT_POST_REVIEW_DELAY_MS, buildAutoReviewSchedule, getNextAutoReviewAtAfterFailure, repairAutoReviewRecord, shouldRepairAutoReview } from './core/performanceReviewScheduler.js';
 import { getLanguageInstruction, getLanguageName, getPromptText, normalizeEngineLanguage, toPreferredLanguage } from './core/i18n.js';
@@ -38,15 +38,22 @@ function isFreshPostingLock(state = {}, now = Date.now()) {
 // Storage Abstraction (Promise Wrapper)
 
 function runStorageMigration() {
-  chrome.storage.local.get(['storageSchemaVersion', 'draftVault', 'aiMemory'], (res) => {
+  chrome.storage.local.get([
+    'storageSchemaVersion',
+    'draftVault',
+    'aiMemory',
+    'generationSessions',
+    'relationshipInteractions'
+  ], (res) => {
     if (Number(res.storageSchemaVersion) >= STORAGE_SCHEMA_VERSION) return;
+    const migrated = migrateStoragePayload(res);
     const updates = {
-      storageSchemaVersion: STORAGE_SCHEMA_VERSION,
-      aiMemory: normalizeAiMemory(res.aiMemory || {})
+      storageSchemaVersion: migrated.storageSchemaVersion,
+      draftVault: migrated.draftVault,
+      aiMemory: migrated.aiMemory,
+      generationSessions: migrated.generationSessions,
+      relationshipInteractions: migrated.relationshipInteractions
     };
-    if (Array.isArray(res.draftVault)) {
-      updates.draftVault = res.draftVault.slice(0, 100).map(normalizePostRecord);
-    }
     chrome.storage.local.set(updates, () => {
       addLog('info', 'storage_migrated', [STORAGE_SCHEMA_VERSION]);
     });
