@@ -1,23 +1,53 @@
 import { applyLanguage, t, getCurrentLang } from './i18n.js';
 import { renderVault, addLog, renderLogs, renderAiMemory } from './logs.js';
 import { executeMagicAction, currentContext, setCurrentContext, lastActionType, showToast, setOriginalAIOutput } from '../options.js';
-import { POST_ORIGIN, POST_STATUS, normalizePostRecord } from '../../core/storageSchema.js';
+import { POST_CONTENT_MODE, POST_ORIGIN, POST_STATUS, normalizePostRecord } from '../../core/storageSchema.js';
+import { normalizeEngineLanguage, toPreferredLanguage } from '../../core/i18n.js';
+import { localizeAutoPersona } from '../../core/autoPersona.js';
+import { normalizeXClientId } from '../../core/constants.js';
+
+function normalizeReplyStrategyValue(value = '') {
+  const text = String(value || '').trim();
+  if (text === '专业流：专业知识 / 数据') return '专业流：认知洞见 / 启发式';
+  return text;
+}
+
+export function renderProfileFields(items = {}) {
+  const persona = items.aiPersona || {};
+  const customPersonaInput = document.getElementById('custom-persona');
+  if (customPersonaInput && document.activeElement !== customPersonaInput) {
+    customPersonaInput.value = persona.characteristics || '';
+  }
+
+  const customTweetingStrategyInput = document.getElementById('custom-tweeting-strategy');
+  if (customTweetingStrategyInput && document.activeElement !== customTweetingStrategyInput) {
+    customTweetingStrategyInput.value = persona.goals || '';
+  }
+}
+
+export function renderStyleTrainingList(styleTrainingData = []) {
+  const styleList = document.getElementById('style-training-list');
+  if (!styleList) return;
+  styleList.textContent = '';
+  let styleData = styleTrainingData;
+  if (!Array.isArray(styleData)) {
+    styleData = styleData ? [styleData] : [];
+  }
+  if (styleData.length === 0) {
+    addStyleItem('', styleList);
+    return;
+  }
+  styleData.forEach(text => addStyleItem(text, styleList));
+}
 
 export function updatePreflightStatus(apiKey) {
   const banner = document.getElementById('api-warning-banner');
   const actionButtons = document.querySelectorAll('.magic-btn.primary, #btn-manual-rewrite');
   
-  const activeTab = document.querySelector('.nav-item.active');
-  const isSettingsTab = activeTab && activeTab.dataset.view === 'view-persona';
-  
   if (!apiKey || apiKey.trim() === '' || apiKey.startsWith('mock-')) {
     if (banner) {
-      if (isSettingsTab) {
-        banner.classList.add('hidden');
-      } else {
-        banner.classList.remove('hidden');
-      }
-      banner.onclick = () => document.querySelector('.nav-item[data-view="view-persona"]').click();
+      banner.classList.remove('hidden');
+      banner.onclick = () => document.querySelector('.nav-item[data-view="view-settings"]')?.click();
     }
     actionButtons.forEach(btn => {
       btn.style.opacity = '0.5';
@@ -44,16 +74,16 @@ export function loadMemory() {
     replyStrategy: '',
     customPromptGlobal: '',
     styleTrainingData: '',
-    engineLanguage: 'en',
+    engineLanguage: 'auto',
     uiTheme: 'auto',
     draftVault: [],
     aiMemory: { learnedRules: [] },
     onboardingStrategy: {},
     aiPersona: {},
-    gistToken: '',
-    gistAutoSync: false,
-    gistStatus: '',
-    gistLastSyncAt: 0
+    accountPerformanceBaseline: {},
+    accountLanguage: '',
+    xAuth: {},
+    xDataSyncStatus: {}
   }, (items) => {
     const apiKeyInput = document.getElementById('api-key-input');
     if (apiKeyInput) {
@@ -67,21 +97,29 @@ export function loadMemory() {
       updatePreflightStatus(apiKeyInput.value.trim());
     }
     
-    const gistTokenInput = document.getElementById('gist-token');
-    if (gistTokenInput) {
-      gistTokenInput.value = items.gistToken || '';
-      updateGistStatusUI(items);
+    const xClientInput = document.getElementById('x-client-id');
+    if (xClientInput) {
+      const xClientId = normalizeXClientId(items.xAuth?.clientId);
+      xClientInput.value = xClientId;
+      if (items.xAuth?.clientId && items.xAuth.clientId !== xClientId && !items.xAuth?.accessToken) {
+        chrome.storage.local.set({ xAuth: { ...(items.xAuth || {}), clientId: xClientId } });
+      }
+      updateXAuthStatusUI(items.xAuth || {}, items.xDataSyncStatus || {}, items);
     }
     
-    const customPersonaInput = document.getElementById('custom-persona');
-    if (customPersonaInput) {
-      customPersonaInput.value = items.aiPersona?.characteristics || '';
+    const localizedPersona = localizeAutoPersona(
+      items.aiPersona || {},
+      items.xAuth?.user || {},
+      items.engineLanguage || 'auto',
+      navigator.language,
+      items.accountLanguage || items.xDataSyncStatus?.detectedLanguage || ''
+    );
+    if (localizedPersona.changed) {
+      items.aiPersona = localizedPersona.persona;
+      chrome.storage.local.set({ aiPersona: localizedPersona.persona });
     }
-    
-    const customTweetingStrategyInput = document.getElementById('custom-tweeting-strategy');
-    if (customTweetingStrategyInput) {
-      customTweetingStrategyInput.value = items.aiPersona?.goals || '';
-    }
+
+    renderProfileFields(items);
     
     const apiProvider = document.getElementById('api-provider');
     if (apiProvider) {
@@ -112,7 +150,7 @@ export function loadMemory() {
     
     const replyStrategy = document.getElementById('reply-strategy');
     if (replyStrategy) {
-      replyStrategy.value = items.replyStrategy || '极简流：精辟吐槽 / 玩梗';
+      replyStrategy.value = normalizeReplyStrategyValue(items.replyStrategy || '极简流：精辟吐槽 / 玩梗');
       const opt = document.querySelector(`#reply-strategy-container .custom-select-option[data-value="${replyStrategy.value}"]`);
       if (opt) {
         document.querySelector('#reply-strategy-trigger span').textContent = opt.textContent;
@@ -153,36 +191,18 @@ export function loadMemory() {
     }
     
     
-    const styleList = document.getElementById('style-training-list');
-    if (styleList) {
-      styleList.textContent = '';
-      let styleData = items.styleTrainingData;
-      if (!Array.isArray(styleData)) {
-        styleData = styleData ? [styleData] : [];
-      }
-      if (styleData.length === 0) {
-        addStyleItem('', styleList);
-      } else {
-        styleData.forEach(text => addStyleItem(text, styleList));
-      }
-    }
+    renderStyleTrainingList(items.styleTrainingData);
 
     
     const langInput = document.getElementById('engine-language');
     if (langInput) {
-      langInput.value = items.engineLanguage || 'en';
+      langInput.value = items.engineLanguage || 'auto';
       const opt = document.querySelector(`#engine-language-container .custom-select-option[data-value="${langInput.value}"]`);
       if (opt) {
         document.querySelector('#engine-language-trigger span').textContent = opt.textContent;
         document.querySelectorAll('#engine-language-container .custom-select-option').forEach(o => o.classList.remove('selected'));
         opt.classList.add('selected');
       }
-      
-      let gistTokenTimeout;
-      document.getElementById('gist-token')?.addEventListener('input', () => {
-        clearTimeout(gistTokenTimeout);
-        gistTokenTimeout = setTimeout(saveMemory, 800);
-      });
       
       const themeTrigger = document.getElementById('ui-theme-trigger');
     }
@@ -199,7 +219,7 @@ export function loadMemory() {
     }
     
     applyTheme(items.uiTheme || 'auto');
-    applyLanguage(items.engineLanguage || 'en');
+    applyLanguage(items.engineLanguage || 'auto');
     
     updatePreflightStatus(items.apiKey);
     renderVault(items.draftVault);
@@ -221,17 +241,16 @@ export function loadMemory() {
 }
 
 export function saveMemory() {
+  const rawEngineLanguage = document.getElementById('engine-language')?.value || 'auto';
   const toSave = {
     apiKey: document.getElementById('api-key-input').value.trim(),
     apiProvider: document.getElementById('api-provider')?.value || 'gemini',
     aiModel: document.getElementById('ai-model-input')?.value.trim() || 'gemini-2.5-flash',
-    replyStrategy: document.getElementById('reply-strategy')?.value || '极简流：精辟吐槽 / 玩梗',
+    replyStrategy: normalizeReplyStrategyValue(document.getElementById('reply-strategy')?.value || '极简流：精辟吐槽 / 玩梗'),
     customPromptGlobal: document.getElementById('custom-strategy-prompt')?.value || '',
     styleTrainingData: Array.from(document.querySelectorAll('#style-training-list textarea')).map(t => t.value.trim()).filter(t => t !== ''),
-    engineLanguage: document.getElementById('engine-language')?.value || 'en',
-    uiTheme: document.getElementById('ui-theme')?.value || 'auto',
-    gistToken: document.getElementById('gist-token')?.value.trim() || '',
-    gistAutoSync: !!document.getElementById('gist-token')?.value.trim()
+    engineLanguage: rawEngineLanguage,
+    uiTheme: document.getElementById('ui-theme')?.value || 'auto'
   };
 
   if (window.customPrompts) {
@@ -239,38 +258,58 @@ export function saveMemory() {
   }
 
   if (chrome.storage) {
-    chrome.storage.local.get(['aiPersona', 'gistToken'], (res) => {
+    chrome.storage.local.get(['aiPersona', 'onboardingStrategy', 'xAuth', 'accountLanguage', 'xDataSyncStatus'], (res) => {
       let aiPersona = res.aiPersona || {};
       const personaVal = document.getElementById('custom-persona')?.value.trim();
       const strategyVal = document.getElementById('custom-tweeting-strategy')?.value.trim();
       if (personaVal !== undefined) aiPersona.characteristics = personaVal;
       if (strategyVal !== undefined) aiPersona.goals = strategyVal;
+      const detectedAccountLanguage = res.accountLanguage || res.xDataSyncStatus?.detectedLanguage || '';
+      aiPersona = localizeAutoPersona(
+        aiPersona,
+        res.xAuth?.user || {},
+        rawEngineLanguage,
+        navigator.language,
+        detectedAccountLanguage
+      ).persona;
       toSave.aiPersona = aiPersona;
+      const preferredLanguageSource = rawEngineLanguage === 'auto' && detectedAccountLanguage
+        ? detectedAccountLanguage
+        : rawEngineLanguage;
+      toSave.onboardingStrategy = {
+        ...(res.onboardingStrategy || {}),
+        preferredLanguage: toPreferredLanguage(preferredLanguageSource, navigator.language)
+      };
       
-      // Reset status if token changed
-      if (toSave.gistToken !== res.gistToken) {
-        toSave.gistStatus = 'pending';
-        toSave.gistLastSyncAt = 0;
-        toSave.gistId = '';
-      }
+      const xClientId = normalizeXClientId(document.getElementById('x-client-id')?.value);
+      toSave.xAuth = {
+        ...(res.xAuth || {}),
+        clientId: xClientId
+      };
 
       chrome.storage.local.set(toSave, () => {
       applyTheme(toSave.uiTheme);
       applyLanguage(toSave.engineLanguage);
-      updateGistStatusUI(toSave);
+      chrome.storage.local.get(['xAuth', 'xDataSyncStatus', 'accountPerformanceBaseline', 'styleTrainingData'], (latest) => {
+        updateXAuthStatusUI(latest.xAuth || {}, latest.xDataSyncStatus || {}, latest);
+      });
       
       const automationModeInput = document.getElementById('automation-mode');
       if (automationModeInput) {
         chrome.storage.local.get(['onboardingStrategy'], (res) => {
-          let str = res.onboardingStrategy || {};
+          let str = {
+            ...(toSave.onboardingStrategy || {}),
+            ...(res.onboardingStrategy || {})
+          };
           str.automationMode = automationModeInput.value;
+          str.preferredLanguage = toSave.onboardingStrategy.preferredLanguage;
           chrome.storage.local.set({ onboardingStrategy: str }, () => {
-            addLog(t('log_config_updated'), 'system');
+            addLog('config_updated', 'system');
             updatePreflightStatus(toSave.apiKey);
           });
         });
       } else {
-        addLog(t('log_config_updated'), 'system');
+        addLog('config_updated', 'system');
         updatePreflightStatus(toSave.apiKey);
       }
       
@@ -300,8 +339,7 @@ export function updateEngineBadge(isEnabled) {
   const engineBadge = document.getElementById('engine-status-badge');
   if (!engineBadge) return;
   const langInput = document.getElementById('engine-language');
-  let lang = langInput ? langInput.value : 'auto';
-  if (lang === 'auto') lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
+  const lang = normalizeEngineLanguage(langInput ? langInput.value : 'auto', navigator.language);
   const dict = window.i18nDict[lang] || window.i18nDict.zh;
   
   if (isEnabled) {
@@ -347,6 +385,35 @@ export function bindActions() {
   // Auto-save listeners
   const apiInput = document.getElementById('api-key-input');
   if (apiInput) apiInput.addEventListener('blur', saveMemory);
+
+  document.getElementById('btn-connect-x')?.addEventListener('click', () => {
+    const clientId = normalizeXClientId(document.getElementById('x-client-id')?.value);
+    if (!clientId) {
+      showToast('X OAuth client is not configured', 'error');
+      return;
+    }
+    showToast(t('toast_x_connecting', 'Connecting X...'), 'system');
+    chrome.runtime.sendMessage({ action: 'connectXAccount', clientId }, (response) => {
+      if (chrome.runtime.lastError || !response?.success) {
+        showToast(response?.error || chrome.runtime.lastError?.message || 'Connect X failed', 'error');
+        return;
+      }
+      chrome.storage.local.get(['xAuth', 'xDataSyncStatus', 'accountPerformanceBaseline', 'styleTrainingData'], (res) => updateXAuthStatusUI(res.xAuth || {}, res.xDataSyncStatus || {}, res));
+      showToast(t('toast_x_connected', 'X connected'), 'system');
+    });
+  });
+
+  document.getElementById('btn-disconnect-x')?.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ action: 'disconnectXAccount' }, (response) => {
+      if (chrome.runtime.lastError || !response?.success) {
+        showToast(response?.error || chrome.runtime.lastError?.message || 'Disconnect X failed', 'error');
+        return;
+      }
+      updateXAuthStatusUI({}, {});
+      showToast(t('toast_x_disconnected', 'X disconnected'), 'system');
+    });
+  });
+
   
   const customPersonaInput = document.getElementById('custom-persona');
   if (customPersonaInput) customPersonaInput.addEventListener('blur', saveMemory);
@@ -383,7 +450,7 @@ export function bindActions() {
       if (lastActionType) {
         executeMagicAction(lastActionType, true);
       } else {
-        addLog(t('log_no_context'), 'error');
+        addLog('no_context', 'error');
       }
     });
   }
@@ -413,12 +480,12 @@ export function bindActions() {
   const resultBoxUI = document.getElementById('generation-result');
   if (resultBoxUI) {
     resultBoxUI.addEventListener('click', () => {
-      const text = resultBoxUI.innerText.trim();
+      const text = resultBoxUI.textContent.trim();
       if (!text || text === '✨ 正在生成爆款文案...') return;
       navigator.clipboard.writeText(text).then(() => {
         showToast(t('toast_copied'), 'system');
       }).catch(err => {
-        addLog(t('log_copy_fail') + ': ' + err.message, 'error');
+        addLog('copy_failed', 'error', [err.message]);
       });
     });
   }
@@ -426,7 +493,7 @@ export function bindActions() {
   const btnSaveLib = document.getElementById('btn-save-library');
   if (btnSaveLib) {
     btnSaveLib.addEventListener('click', () => {
-      const text = document.getElementById('generation-result').innerText.trim();
+      const text = document.getElementById('generation-result').textContent.trim();
       if (!text) return;
       chrome.storage.local.get({ draftVault: [] }, (res) => {
         const vault = res.draftVault;
@@ -437,6 +504,7 @@ export function bindActions() {
           authorName: 'Manual Rewrite',
           source: 'Manual Rewrite',
           origin: POST_ORIGIN.MANUAL_REWRITE,
+          contentMode: POST_CONTENT_MODE.REWRITE,
           status: POST_STATUS.DRAFT,
           savedAt: Date.now()
         }));
@@ -460,7 +528,7 @@ export function bindActions() {
   document.getElementById('btn-manual-rewrite').addEventListener('click', () => {
     const val = document.getElementById('manual-input').value.trim();
     if (!val) {
-      addLog(t('log_enter_material'), 'error');
+      addLog('enter_material', 'error');
       return;
     }
     // Simulate new context
@@ -469,12 +537,15 @@ export function bindActions() {
       data: {
         text: val,
         authorName: '外部素材导入',
-        authorHandle: 'manual'
+        authorHandle: 'manual',
+        sourceType: 'manual_input'
       }
     });
     // Run rewrite
     executeMagicAction('viral_rewrite');
-    document.getElementById('manual-input').value = '';
+    const manualInput = document.getElementById('manual-input');
+    manualInput.value = '';
+    manualInput.dispatchEvent(new Event('input', { bubbles: true }));
   });
 
 
@@ -499,7 +570,12 @@ export function bindActions() {
     }
     chrome.storage.local.set(updateObj, () => {
       updateEngineBadge(isEnabled);
-      addLog(isEnabled ? t('log_engine_start') : t('log_engine_stop'), isEnabled ? 'system' : 'error');
+      addLog(isEnabled ? 'automation_started' : 'automation_stopped', isEnabled ? 'system' : 'error');
+      if (isEnabled) {
+        chrome.runtime.sendMessage({ action: 'ensureAutomationXTab', reason: 'options_toggle', active: false }, () => {
+          void chrome.runtime.lastError;
+        });
+      }
     });
   });
   
@@ -734,26 +810,102 @@ export function applyTheme(theme) {
   }
 }
 
-export function updateGistStatusUI(items) {
-  const text = document.getElementById('gist-status-text');
+function formatXDataSyncStatus(syncStatus = {}, connected = false) {
+  if (!connected) {
+    return {
+      text: t('x_data_status_idle', 'Connect X to read Profile, language, and baseline performance context.'),
+      tone: ''
+    };
+  }
+  if (!syncStatus?.updatedAt) {
+    return {
+      text: t('x_data_status_syncing', 'Scanning X Profile for account and performance context...'),
+      tone: 'warning'
+    };
+  }
+  if (syncStatus.status === 'syncing') {
+    return {
+      text: t('x_data_status_syncing', 'Scanning X Profile for account and performance context...'),
+      tone: 'warning'
+    };
+  }
+  if (syncStatus.status === 'profile_only') {
+    return {
+      text: t('x_data_status_profile_only', 'X Profile is connected. Add writing samples manually.'),
+      tone: 'learning'
+    };
+  }
+  if (syncStatus.status === 'page_scan') {
+    return {
+      text: t('x_data_status_learning', 'X Profile context synced. Add writing samples manually.'),
+      tone: 'learning'
+    };
+  }
+  if (syncStatus.status === 'unavailable') {
+    return {
+      text: t('x_data_status_unavailable', 'Performance context is not available yet. Add writing samples manually.'),
+      tone: 'warning'
+    };
+  }
+  return {
+    text: t('x_data_status_syncing', 'Scanning X Profile for account and performance context...'),
+    tone: 'warning'
+  };
+}
+
+function getProfileSyncDisplayStatus(syncStatus = {}, fallback = {}, auth = {}) {
+  const hasSyncTime = Number(syncStatus?.profileEnrichedAt || syncStatus?.updatedAt || 0) > 0;
+  if (hasSyncTime) return syncStatus || {};
+  const fallbackTime = Number(
+    auth?.profileScannedAt
+    || fallback?.accountPerformanceBaseline?.scannedAt
+    || 0
+  ) || 0;
+  if (!fallbackTime) return syncStatus || {};
+  return {
+    ...(syncStatus || {}),
+    profileEnrichedAt: fallbackTime,
+    updatedAt: fallbackTime
+  };
+}
+
+export function updateXAuthStatusUI(auth = {}, syncStatus = null, fallback = {}) {
+  const text = document.getElementById('x-auth-status-text');
+  const card = document.getElementById('x-connect-card');
+  const status = document.getElementById('x-auth-status');
+  const dataStatus = document.getElementById('x-data-sync-status');
+  const connectBtn = document.getElementById('btn-connect-x');
+  const disconnectBtn = document.getElementById('btn-disconnect-x');
+  const syncBtn = document.getElementById('btn-sync-x-profile');
   if (!text) return;
-  
-  text.removeAttribute('data-i18n');
-  
-  if (!items.gistToken) {
-    text.textContent = t('sync_status_unconfigured', '未配置');
-  } else if (items.gistStatus === 'error') {
-    text.textContent = t('sync_status_error', '同步失败');
-    text.title = items.gistLastError || '';
-  } else if (items.gistStatus === 'synced') {
-    if (items.gistLastSyncAt) {
-      const d = new Date(items.gistLastSyncAt);
-      text.textContent = t('sync_status_synced', '已同步') + ' ' + d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
-    } else {
-      text.textContent = t('sync_status_synced', '已同步');
-    }
+  const displaySyncStatus = getProfileSyncDisplayStatus(syncStatus || {}, fallback || {}, auth || {});
+
+  const username = auth.user?.username || '';
+  const connected = Boolean(auth.accessToken);
+  if (auth.accessToken) {
+    text.removeAttribute('data-i18n');
+    dataStatus?.removeAttribute('data-i18n');
+    card?.classList.add('is-connected');
+    status?.classList.add('is-connected');
+    text.textContent = username ? `@${username}` : (getCurrentLang() === 'zh' ? '已连接' : 'Connected');
+    if (connectBtn) connectBtn.style.display = 'none';
+    if (disconnectBtn) disconnectBtn.style.display = 'inline-flex';
+    if (syncBtn) syncBtn.style.display = 'inline-flex';
   } else {
-    text.textContent = t('sync_status_pending', '同步中...');
+    text.setAttribute('data-i18n', 'x_status_not_connected');
+    dataStatus?.setAttribute('data-i18n', 'x_data_status_idle');
+    card?.classList.remove('is-connected');
+    status?.classList.remove('is-connected');
+    text.textContent = t('x_status_not_connected', 'Not connected');
+    if (connectBtn) connectBtn.style.display = 'inline-flex';
+    if (disconnectBtn) disconnectBtn.style.display = 'none';
+    if (syncBtn) syncBtn.style.display = 'none';
+  }
+  if (dataStatus) {
+    const nextStatus = formatXDataSyncStatus(displaySyncStatus || {}, connected);
+    dataStatus.textContent = nextStatus.text;
+    dataStatus.classList.toggle('is-learning', nextStatus.tone === 'learning');
+    dataStatus.classList.toggle('is-warning', nextStatus.tone === 'warning');
   }
 }
 
@@ -766,7 +918,7 @@ export function updateApiStatusIndicator() {
   if (!dot || !textSpan) return;
   
   const apiKey = document.getElementById('api-key-input').value.trim();
-  const lang = document.getElementById('engine-language')?.value || 'en';
+  const lang = normalizeEngineLanguage(document.getElementById('engine-language')?.value || 'auto', navigator.language);
   
   if (apiVerificationTimer) clearTimeout(apiVerificationTimer);
   
@@ -774,7 +926,7 @@ export function updateApiStatusIndicator() {
     // Show Verifying state
     dot.style.background = '#F59E0B'; // Yellow
     dot.classList.add('pulse');
-    textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '正在验证...' : 'Verifying...';
+    textSpan.textContent = t('api_verifying', lang === 'zh' ? '正在验证...' : 'Verifying...');
     textSpan.style.color = '#F59E0B';
     
     // Ping background script after 800ms debounce
@@ -785,19 +937,19 @@ export function updateApiStatusIndicator() {
             if (chrome.runtime.lastError) {
               dot.style.background = '#EF4444'; // Red
               dot.classList.remove('pulse');
-              textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '请刷新面板 (系统已更新)' : 'Please refresh panel';
+              textSpan.textContent = t('api_refresh_panel', lang === 'zh' ? '请刷新面板 (系统已更新)' : 'Please refresh panel');
               textSpan.style.color = '#EF4444';
               return;
             }
             if (response && response.success) {
               dot.style.background = '#10B981'; // Green
               dot.classList.add('pulse');
-              textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '已连接' : 'Connected';
+              textSpan.textContent = t('api_connected', lang === 'zh' ? '已连接' : 'Connected');
               textSpan.style.color = '#10B981';
             } else {
               dot.style.background = '#EF4444'; // Red
               dot.classList.remove('pulse');
-              textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '验证失败' : 'Invalid Key';
+              textSpan.textContent = t('api_invalid', lang === 'zh' ? '验证失败' : 'Invalid Key');
               textSpan.style.color = '#EF4444';
               console.error("API Verification failed:", response?.error);
             }
@@ -805,7 +957,7 @@ export function updateApiStatusIndicator() {
         } catch (e) {
           dot.style.background = '#EF4444'; // Red
           dot.classList.remove('pulse');
-          textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '请刷新面板 (系统已更新)' : 'Please refresh panel';
+          textSpan.textContent = t('api_refresh_panel', lang === 'zh' ? '请刷新面板 (系统已更新)' : 'Please refresh panel');
           textSpan.style.color = '#EF4444';
         }
       }
@@ -813,7 +965,7 @@ export function updateApiStatusIndicator() {
   } else {
     dot.style.background = '#EF4444'; // Red
     dot.classList.remove('pulse');
-    textSpan.textContent = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh') ? '未连接' : 'Not Connected';
+    textSpan.textContent = t('api_not_connected', lang === 'zh' ? '未连接' : 'Not Connected');
     textSpan.style.color = 'var(--text-sub)';
   }
 }
@@ -826,8 +978,7 @@ export function resetCustomPrompt() {
     
     const btn = document.getElementById('btn-reset-prompt');
     const oldText = btn.textContent;
-    const lang = document.getElementById('engine-language')?.value || 'en';
-    const isZh = lang === 'zh' || lang === 'auto' && navigator.language.startsWith('zh');
+    const lang = normalizeEngineLanguage(document.getElementById('engine-language')?.value || 'auto', navigator.language);
     
     btn.textContent = '';
     const i = document.createElement('i');
@@ -837,7 +988,7 @@ export function resetCustomPrompt() {
     btn.appendChild(i);
     const span = document.createElement('span');
     span.style.color = '#10B981';
-    span.textContent = ' ' + (isZh ? '已重置' : 'Reset');
+    span.textContent = ' ' + t('btn_reset_done', lang === 'zh' ? '已重置' : 'Reset');
     btn.appendChild(span);
     if (window.lucide) window.lucide.createIcons();
     

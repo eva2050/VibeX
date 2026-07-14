@@ -306,9 +306,28 @@ function collectTopicKeywords(state = {}) {
   return [...new Set([...base, ...strategyKeywords, ...extracted])];
 }
 
+// Matches a single keyword against already-lowercased text. Latin-script
+// keywords (letters/digits/spaces only, no CJK) are matched on word
+// boundaries: plain substring matching let short/common entries like "ai" or
+// "vc" fire on totally unrelated tweets just because "ai" is a substring of
+// "said"/"maintain"/"raises" etc, making the whole topic filter close to a
+// no-op. CJK terms don't have whitespace-delimited word boundaries the way
+// Latin text does, so substring matching stays appropriate there (that's how
+// Chinese/Japanese text is actually segmented/read).
+function keywordMatchesText(normalizedText, keyword) {
+  const kw = String(keyword || '').trim().toLowerCase();
+  if (!kw) return false;
+  const isLatinOnly = /^[a-z0-9][a-z0-9 .+#'-]*$/i.test(kw);
+  if (isLatinOnly) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i').test(normalizedText);
+  }
+  return normalizedText.includes(kw);
+}
+
 function hasRelevantTopic(text = '', state = {}) {
   const normalized = String(text || '').toLowerCase();
-  return collectTopicKeywords(state).some(keyword => normalized.includes(keyword));
+  return collectTopicKeywords(state).some(keyword => keywordMatchesText(normalized, keyword));
 }
 
 function hasStandaloneReplyPotential(text = '') {
@@ -414,6 +433,7 @@ window.VibeXEvaluator = {
   buildDiscoverySearchQueries,
   isSensitiveReplyTarget,
   collectTopicKeywords,
+  keywordMatchesText,
   hasRelevantTopic,
   hasStandaloneReplyPotential,
   isLikelyProjectAccountLabel,

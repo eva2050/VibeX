@@ -29,7 +29,7 @@ async function insertIntoDraftJs(editor, text) {
 (function() {
 'use strict';
 
-console.log("X Auto Bot: Scraper loaded on X.com");
+console.log("VibeX: Scraper loaded on X.com");
 
 // Global cooldown to prevent hitting Gemini API rate limits (15 requests/min)
 const REPLY_COOLDOWN_MS = 300000; // 5 minutes
@@ -39,6 +39,9 @@ const MIN_REPLY_OPPORTUNITY_SCORE = 35;
 const SEARCH_DISCOVERY_MIN_INTERVAL_MS = 90 * 1000;
 const SEARCH_DISCOVERY_ROTATE_INTERVAL_MS = 2 * 60 * 1000;
 const SEARCH_DISCOVERY_LOW_QUALITY_ROTATE_MS = 15 * 1000;
+const SEARCH_DISCOVERY_DEAD_END_ROTATE_MS = 3000;
+const SEARCH_EMPTY_ROTATE_MIN_AGE_MS = 8000;
+const STARTUP_DISCOVERY_GRACE_MS = 60 * 1000;
 
 const {
   SEARCH_DISCOVERY_LOOKBACK_DAYS,
@@ -95,6 +98,63 @@ function addLog(level, message) {
   });
 }
 
+function safeRuntimeSendMessage(message, callback) {
+  if (!chrome.runtime?.id) return;
+  try {
+    const result = chrome.runtime.sendMessage(message, callback);
+    if (result?.catch) result.catch(() => {});
+  } catch (error) {
+    // Happens when the extension is reloaded while this old content script is still running.
+  }
+}
+
+const ReplyFlowState = window.VibeXAutomationState;
+const ReplyFlowEvents = ReplyFlowState.EVENTS;
+let replyFlowLocalLockUntil = 0;
+
+function hasActiveReplyFlow(state = {}) {
+  return Date.now() < replyFlowLocalLockUntil || ReplyFlowState.hasActiveReplyFlow(state);
+}
+
+function startReplyFlowLocalLock(ttlMs = 3 * 60 * 1000) {
+  replyFlowLocalLockUntil = Date.now() + ttlMs;
+}
+
+function clearReplyFlowLocalLock() {
+  replyFlowLocalLockUntil = 0;
+}
+
+window.addEventListener('xAutoBot_ReplyFlowStateVisible', () => {
+  clearReplyFlowLocalLock();
+});
+
+function hasActivePostFlow(state = {}) {
+  return Boolean(state.pendingPost || state.isPosting);
+}
+
+function applyReplyFlowEvent(event, payload = {}, extra = {}, callback) {
+  ReplyFlowState.applyReplyFlowEvent(chrome.storage.local, event, payload, extra, callback);
+}
+
+function clearReplyFlowState(values = {}, callback) {
+  clearReplyFlowLocalLock();
+  applyReplyFlowEvent(ReplyFlowEvents.CLEAR, {}, values, callback);
+}
+
+function normalizeUiLanguage(value = 'auto') {
+  const lang = String(value || 'auto').trim();
+  const browserLang = (navigator.language || 'en').toLowerCase();
+  if (lang === 'auto') {
+    if (browserLang.startsWith('zh')) return 'zh';
+    if (browserLang.startsWith('ja')) return 'ja';
+    if (browserLang.startsWith('es')) return 'es';
+    if (browserLang.startsWith('id')) return 'id';
+    return 'en';
+  }
+  if (lang === 'zh-CN' || lang === 'zh-TW') return 'zh';
+  return ['zh', 'en', 'ja', 'es', 'id'].includes(lang) ? lang : 'en';
+}
+
 function incrementProcessedTweets() {
   chrome.storage.local.get(['stats'], (res) => {
     const stats = res.stats || { tweetsProcessed: 0, repliesSent: 0 };
@@ -136,14 +196,69 @@ function isProfilePath(pathname = '') {
   const firstSegment = pathname.split('/').filter(Boolean)[0] || '';
   const blocked = new Set([
     'home', 'explore', 'notifications', 'messages', 'i', 'settings',
-    'compose', 'search', 'jobs', 'communities', 'premium', 'verified_orgs'
+    'compose', 'search', 'intent', 'login', 'logout', 'oauth', 'share',
+    'jobs', 'communities', 'premium', 'verified_orgs'
   ]);
   return /^[A-Za-z0-9_]{1,15}$/.test(firstSegment) && !blocked.has(firstSegment.toLowerCase());
 }
 
-function isDiscoverySurfacePage() {
+function isDiscoverySurfacePage(state = {}) {
   const pathname = window.location.pathname || '';
+  if (getAutomationMode(state) === 'autoReply') {
+    return pathname === '/home' || pathname === '/explore' || pathname.startsWith('/i/lists/');
+  }
   return pathname === '/home' || pathname === '/explore' || pathname === '/search' || pathname.startsWith('/i/lists/');
+}
+
+function isElementVisible(element) {
+  if (!element || !element.getClientRects?.().length) return false;
+  const style = window.getComputedStyle(element);
+  if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0
+    && rect.height > 0
+    && rect.bottom > 0
+    && rect.right > 0
+    && rect.top < window.innerHeight
+    && rect.left < window.innerWidth;
+}
+
+function normalizeComposerText(text = '') {
+  return String(text || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[\u200b\u200c\u200d\ufeff]/g, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(line => line.trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+function getComposerText(editor) {
+  const text = normalizeComposerText(editor?.innerText || editor?.textContent || editor?.value || '');
+  if (/^(what is happening\?!?|what's happening\?!?|post your reply|tweet your reply|发布你的回复|有什么新鲜事|正在发生什么)$/i.test(text)) {
+    return '';
+  }
+  return text;
+}
+
+function hasEnabledComposerSubmit(editor) {
+  const root = editor?.closest('div[role="dialog"]') || editor?.closest('main') || document;
+  const button = root.querySelector('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]');
+  return Boolean(button && isElementVisible(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true');
+}
+
+function hasVisibleUnfinishedTweetEditor() {
+  const selectors = [
+    '[data-testid="tweetTextarea_0"] [contenteditable="true"]',
+    '[data-testid="tweetTextarea_0"][contenteditable="true"]',
+    '[role="textbox"][contenteditable="true"]'
+  ];
+  const editors = [...new Set(selectors.flatMap(selector => Array.from(document.querySelectorAll(selector))))]
+    .filter(editor => editor.isContentEditable && isElementVisible(editor));
+
+  return editors.some(editor => getComposerText(editor) || hasEnabledComposerSubmit(editor));
 }
 
 function getCurrentProfilePath() {
@@ -179,6 +294,9 @@ function extractProfileSnapshot() {
   const handleFromName = extractFirstMatch(nameText, [/@([A-Za-z0-9_]{1,15})/]);
   const handleFromPath = getCurrentProfilePath().replace('/', '');
   const handle = handleFromName || handleFromPath;
+  const avatarUrl = document.querySelector('[data-testid^="UserAvatar-Container"] img')?.src
+    || document.querySelector('main a[href$="/photo"] img')?.src
+    || '';
   const mainText = document.querySelector('main')?.innerText || document.body.innerText || '';
   const following = extractFirstMatch(mainText, [
     /([0-9,.万千Kk]+)\s*(?:Following|正在关注|关注中)/,
@@ -199,6 +317,19 @@ function extractProfileSnapshot() {
 
   return {
     text: lines.join('\n').trim(),
+    profile: {
+      source: 'profile_scan',
+      username: handle,
+      handle,
+      name: displayName,
+      description: bioText,
+      profile_image_url: avatarUrl,
+      avatarUrl,
+      followers,
+      following,
+      followersCount: parseMetricNumber(followers),
+      followingCount: parseMetricNumber(following)
+    },
     hasIdentity: Boolean(displayName || handle || bioText),
     hasBio: Boolean(bioText)
   };
@@ -214,9 +345,21 @@ let xLoginDetectedNotified = false;
 
 function startAutoScroll(options = {}) {
   if (scrollInterval || restTimeout) return;
-  chrome.storage.local.get(['isAutoPaused', 'pendingReply', 'pendingPost', 'lastSurfaceNavigationAt', 'onboardingStrategy'], (result) => {
+  chrome.storage.local.get(['isAutoPaused', 'pendingReply', 'pendingPost', 'isPosting', 'lastSurfaceNavigationAt', 'onboardingStrategy', 'isGeneratingReply', 'isReplyTyping', 'isTyping', 'replyFlowLockUntil'], (result) => {
     if (result.isAutoPaused && !options.skipPauseCheck) {
       addLog('info', '自动操作已暂停，不启动自动滚动');
+      return;
+    }
+    if (hasActiveReplyFlow(result)) {
+      addLog('info', '正在处理上一条自动回复，暂不启动自然浏览');
+      return;
+    }
+    if (hasActivePostFlow(result)) {
+      addLog('info', '正在处理待发推文，暂不启动自然浏览');
+      return;
+    }
+    if (hasVisibleUnfinishedTweetEditor()) {
+      addLog('info', '检测到未完成编辑器，暂不启动自然浏览');
       return;
     }
     if (maybeNavigateToHomeSurface(result, '启动时停在个人主页或非发现页')) return;
@@ -294,6 +437,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 chrome.storage.local.get(['profileReadRequested', 'botNavigationTime', 'isRunning', 'automationStartTime'], (result) => {
   const isBotNavigating = result.botNavigationTime && (Date.now() - result.botNavigationTime < 10000);
   const isJustStarted = result.automationStartTime && (Date.now() - result.automationStartTime < 30000);
+  const isHiddenSystemNavigation = isBotNavigating && document.visibilityState === 'hidden';
+
+  if (isHiddenSystemNavigation) {
+    return;
+  }
   
   if (isBotNavigating || isJustStarted) {
     // Bot is navigating itself (e.g. rotating keywords) or just started, do not pause.
@@ -317,7 +465,7 @@ function notifyXLoginDetectedIfNeeded() {
   const accountSwitcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
   if (!profileLinkNode && !accountSwitcher) return;
   xLoginDetectedNotified = true;
-  chrome.runtime.sendMessage({ action: 'xLoginDetected' }, () => {});
+  safeRuntimeSendMessage({ action: 'xLoginDetected' }, () => {});
 }
 
 const loginDetectInterval = setInterval(() => {
@@ -327,9 +475,71 @@ const loginDetectInterval = setInterval(() => {
 setTimeout(() => clearInterval(loginDetectInterval), 30000);
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'readProfileSnapshot') {
+    const snapshot = extractProfileSnapshot();
+    sendResponse({
+      success: Boolean(snapshot.hasIdentity),
+      bio: snapshot.text || ''
+    });
+    return false;
+  }
+
   if (request.action === 'forceReadProfileBio') {
     ensureBioExtracted({ force: true });
     sendResponse({ success: true });
+    return false;
+  }
+
+  if (request.action === 'readPostPerformance') {
+    setTimeout(() => {
+      sendResponse(readTweetPerformanceSnapshot(request));
+    }, 300);
+    return true;
+  }
+
+  if (request.action === 'scanProfilePerformanceBaseline') {
+    const profilePath = getProfilePathFromNav();
+    if (!isOnTargetProfilePage(profilePath) && profilePath) {
+      window.location.assign(`https://x.com${profilePath}`);
+      sendResponse({ success: false, navigating: true, error: 'navigating to profile' });
+      return false;
+    }
+    setTimeout(() => {
+      sendResponse(scanProfilePerformanceBaseline(request.limit || 30));
+    }, 500);
+    return true;
+  }
+
+  if (request.action === 'scanCreatorCenterSnapshot') {
+    setTimeout(() => {
+      const text = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+      const isCreatorPage = /creator|analytics|monetization|verified/i.test(location.href + ' ' + text);
+      sendResponse({
+        success: Boolean(text && isCreatorPage),
+        url: location.href,
+        text: text.slice(0, 5000),
+        capturedAt: Date.now()
+      });
+    }, 800);
+    return true;
+  }
+
+  if (request.action === 'startAutomationLoop') {
+    isReplying = false;
+    twitterCooldownUntil = 0;
+    apiCooldownUntil = 0;
+    chrome.storage.local.set({
+      isAutoPaused: false,
+      twitterCooldownUntil: 0,
+      apiCooldownUntil: 0,
+      ...ReplyFlowState.buildReplyFlowTransition({}, ReplyFlowEvents.CLEAR).update,
+      botNavigationTime: Date.now()
+    }, () => {
+      startAutoScroll({ skipPauseCheck: true });
+      scrapeTweets();
+    });
+    sendResponse({ success: true });
+    return true;
   }
 });
 
@@ -400,7 +610,7 @@ function ensureBioExtracted(options = {}) {
           setProfileProgress('opening_page', '正在打开 Profile 页面...', 35);
           addLog('info', '当前不在 Profile 页面，后台静默打开...');
           chrome.storage.local.set({ botNavigationTime: Date.now(), profileReadRequested: true }, () => {
-            chrome.runtime.sendMessage({ action: 'openProfileTab', url: `https://x.com${profilePath}` });
+            safeRuntimeSendMessage({ action: 'openProfileTab', url: `https://x.com${profilePath}` });
           });
           clearInterval(checkInterval);
         }
@@ -419,11 +629,6 @@ function ensureBioExtracted(options = {}) {
 // Tweet Scraping Logic
 // ==========================================
 function getTweetAuthor(tweetNode) {
-  const userLinks = tweetNode.querySelectorAll('a[href^="/"]');
-  for (const link of userLinks) {
-    const match = link.getAttribute('href').match(/^\/(\w{1,15})\/?$/);
-    if (match) return match[1];
-  }
   const nameDiv = tweetNode.querySelector('div[data-testid="User-Name"]');
   if (nameDiv) {
     const atText = nameDiv.innerText.match(/@(\w{1,15})/);
@@ -435,8 +640,84 @@ function getTweetAuthor(tweetNode) {
 function getTweetText(tweetNode) {
   const textDiv = tweetNode.querySelector('div[data-testid="tweetText"]');
   if (textDiv) return textDiv.innerText.trim();
-  const altText = tweetNode.querySelector('[data-testid="tweet"] span');
-  if (altText) return altText.innerText.trim();
+  return getTweetCardText(tweetNode) || getTweetFallbackContentText(tweetNode);
+}
+
+function isLikelyNonContentCardLine(line = '') {
+  const text = String(line || '').trim();
+  if (!text) return true;
+  if (/^https?:\/\//i.test(text)) return true;
+  if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(text)) return true;
+  if (/^(read more|show more|查看更多|显示更多|阅读更多|from .+)$/i.test(text)) return true;
+  if (/^@[A-Za-z0-9_]{1,15}$/.test(text)) return true;
+  if (/^(\d+([.,]\d+)?[KkMm万]?)$/.test(text)) return true;
+  if (/^(views?|likes?|reposts?|replies|查看|浏览|点赞|转发|回复|收藏)$/i.test(text)) return true;
+  return false;
+}
+
+function getTweetCardText(tweetNode) {
+  const card = tweetNode.querySelector('[data-testid="card.wrapper"]')
+    || tweetNode.querySelector('a[href*="/i/article/"]')?.closest('[role="link"]')
+    || tweetNode.querySelector('a[href*="/articles/"]')?.closest('[role="link"]')
+    || tweetNode.querySelector('a[href*="/i/article/"]')?.closest('div')
+    || tweetNode.querySelector('a[href*="/articles/"]')?.closest('div');
+  if (!card) return '';
+  const lines = String(card.innerText || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => !isLikelyNonContentCardLine(line));
+  const uniqueLines = [];
+  lines.forEach((line) => {
+    if (!uniqueLines.includes(line)) uniqueLines.push(line);
+  });
+  return uniqueLines.slice(0, 3).join('\n').trim();
+}
+
+function getTweetArticleHref(tweetNode) {
+  return tweetNode?.querySelector?.('a[href*="/i/article/"], a[href*="/articles/"], a[href*="/i/web/status/"]')?.getAttribute('href') || '';
+}
+
+function hasArticleCard(tweetNode) {
+  return Boolean(getTweetArticleHref(tweetNode));
+}
+
+function getTweetFallbackContentText(tweetNode) {
+  if (!tweetNode?.cloneNode) return '';
+  const clone = tweetNode.cloneNode(true);
+  [
+    'div[data-testid="User-Name"]',
+    '[data-testid="socialContext"]',
+    'div[role="group"]',
+    'time',
+    'svg',
+    'img',
+    'button',
+    '[aria-label]',
+    '[data-testid="caret"]',
+    '[data-testid="reply"]',
+    '[data-testid="retweet"]',
+    '[data-testid="like"]',
+    '[data-testid="bookmark"]'
+  ].forEach((selector) => {
+    clone.querySelectorAll(selector).forEach(node => node.remove());
+  });
+  const author = getTweetAuthor(tweetNode).toLowerCase();
+  const lines = String(clone.innerText || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => !isLikelyNonContentCardLine(line))
+    .filter(line => line.toLowerCase() !== author)
+    .filter(line => line.length >= 8 || /[\u3400-\u9fff]/.test(line));
+  const uniqueLines = [];
+  lines.forEach((line) => {
+    if (!uniqueLines.includes(line)) uniqueLines.push(line);
+  });
+  return uniqueLines.slice(0, 4).join('\n').trim();
+}
+
+function getArticleIdFromHref(href = '') {
+  const match = String(href || '').match(/\/(?:(?:i\/)?article(?:s)?|i\/web\/status)\/(\d+)/i);
+  if (match?.[1]) return `article-${match[1]}`;
   return '';
 }
 
@@ -485,6 +766,11 @@ function isPromotedTweet(tweetNode) {
   return /Promoted|Ad\b|广告|推广/.test(tweetNode?.innerText || '');
 }
 
+function isRepostedTweet(tweetNode) {
+  const socialContext = tweetNode?.querySelector?.('[data-testid="socialContext"]')?.innerText || '';
+  return /reposted|retweeted|转帖|转发|转推/i.test(socialContext);
+}
+
 function isNestedReplyTweet(tweetNode) {
   return /Replying to|回复给|正在回复/.test(tweetNode?.innerText || '');
 }
@@ -518,6 +804,132 @@ function getTweetMetrics(tweetNode) {
     likes: extractMetricFromText(combined, 'likes?|喜欢|赞'),
     reposts: extractMetricFromText(combined, 'reposts?|retweets?|转帖|转发'),
     replies: extractMetricFromText(combined, 'replies|reply|回复|评论')
+  };
+}
+
+function normalizePostTextForMatch(text = '') {
+  return String(text || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function findTweetArticleForPerformance({ statusId = '', postText = '', author = '' } = {}) {
+  const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+  if (statusId) {
+    const byStatus = articles.find(article => getTweetStatusMeta(article).id === String(statusId));
+    if (byStatus) return byStatus;
+  }
+
+  const targetText = normalizePostTextForMatch(postText);
+  const targetAuthor = String(author || '').replace(/^@/, '').toLowerCase();
+  if (!targetText) return articles[0] || null;
+
+  return articles.find((article) => {
+    const articleText = normalizePostTextForMatch(getTweetText(article));
+    if (!articleText) return false;
+    const authorMatches = !targetAuthor || getTweetAuthor(article).toLowerCase() === targetAuthor || targetAuthor === 'auto agent';
+    return authorMatches && (
+      articleText === targetText
+      || articleText.includes(targetText.slice(0, 120))
+      || targetText.includes(articleText.slice(0, 120))
+    );
+  }) || null;
+}
+
+function readTweetPerformanceSnapshot(target = {}) {
+  const article = findTweetArticleForPerformance(target);
+  if (!article) {
+    return { success: false, error: 'post article not found' };
+  }
+  const metrics = getTweetMetrics(article);
+  const status = getTweetStatusMeta(article);
+  const text = getTweetText(article);
+  const author = getTweetAuthor(article);
+  if (!metricKnown(metrics.views)) {
+    return {
+      success: false,
+      error: 'views not visible yet',
+      metrics,
+      statusId: status.id,
+      postUrl: status.href ? `https://x.com${status.href}` : ''
+    };
+  }
+  return {
+    success: true,
+    metrics,
+    statusId: status.id,
+    postUrl: status.href ? `https://x.com${status.href}` : '',
+    text,
+    author
+  };
+}
+
+      const baselineScanCache = new Map();
+
+function getBaselineEngagementScore(post = {}) {
+  const metrics = post.performanceMetrics || {};
+  return (
+    (Number(metrics.views) || 0)
+    + (Number(metrics.likes) || 0) * 80
+    + (Number(metrics.reposts) || 0) * 180
+    + (Number(metrics.replies) || 0) * 120
+  );
+}
+
+function scanProfilePerformanceBaseline(limit = 30) {
+  const ownHandle = getOwnHandle();
+  const profileSnapshot = extractProfileSnapshot();
+  Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
+    .forEach((article) => {
+      if (isPromotedTweet(article) || isRepostedTweet(article)) return;
+      const metrics = getTweetMetrics(article);
+      const views = Number(metrics.views) || 0;
+      const isArticle = hasArticleCard(article);
+      const author = getTweetAuthor(article);
+      if (ownHandle && author && author.toLowerCase() !== ownHandle) return;
+      const status = getTweetStatusMeta(article);
+      const text = getTweetText(article);
+      if (!text) return;
+      const hasStableStatusId = /^\d+$/.test(String(status.id || ''));
+      if (!views && !isArticle && !hasStableStatusId) return;
+      const id = status.id || `${author}:${normalizePostTextForMatch(text).slice(0, 140)}`;
+      const createdAt = getTweetCreatedAt(article) || (Date.now() - 49 * 60 * 60 * 1000);
+      baselineScanCache.set(id, {
+        id,
+        text,
+        author,
+        postUrl: status.href ? `https://x.com${status.href}` : '',
+        statusId: status.id || id,
+        actualViews: views,
+        performanceMetrics: metrics,
+        contentMode: isNestedReplyTweet(article) ? 'reply' : 'post',
+        isRepost: false,
+        engagementScore: getBaselineEngagementScore({ performanceMetrics: metrics }),
+        reviewedAt: Date.now(),
+        createdAt,
+        publishedAt: createdAt,
+        scannedAt: Date.now()
+      });
+    });
+
+  const maxItems = Math.max(1, Math.min(Number(limit) || 60, 80));
+  const posts = Array.from(baselineScanCache.values())
+    .sort((a, b) => {
+      const scoreDiff = getBaselineEngagementScore(b) - getBaselineEngagementScore(a);
+      if (scoreDiff) return scoreDiff;
+      return Number(b.actualViews || 0) - Number(a.actualViews || 0);
+    })
+    .slice(0, maxItems);
+
+  return {
+    success: posts.length > 0 || Boolean(profileSnapshot.hasIdentity),
+    posts,
+    profile: profileSnapshot.profile,
+    handle: ownHandle || profileSnapshot.profile?.username || '',
+    count: posts.length,
+    sampledCount: baselineScanCache.size
   };
 }
 
@@ -668,10 +1080,10 @@ function getTweetStatusMeta(tweetNode) {
   const links = Array.from(tweetNode.querySelectorAll('a[href*="/status/"]'));
   const link = links.find(item => item.querySelector('time'))
     || links.find(item => getStatusIdFromHref(item.getAttribute('href') || ''));
-  const href = link?.getAttribute('href') || '';
+  const href = link?.getAttribute('href') || getTweetArticleHref(tweetNode) || '';
   return {
     href,
-    id: getStatusIdFromHref(href)
+    id: getStatusIdFromHref(href) || getArticleIdFromHref(href)
   };
 }
 
@@ -700,6 +1112,15 @@ function shouldSendReply(mode) {
   return mode === 'autoReply' || mode === 'autoEngage';
 }
 
+function shouldUseKeywordDiscovery(mode) {
+  return mode === 'autoEngage';
+}
+
+function isAutomationJustStarted(state = {}, graceMs = STARTUP_DISCOVERY_GRACE_MS) {
+  const startedAt = Number(state.automationStartTime) || 0;
+  return Boolean(startedAt && Date.now() - startedAt < graceMs);
+}
+
 let processedTweetIds = new Set();
 let isReplying = false;
 let twitterCooldownUntil = 0;
@@ -717,17 +1138,21 @@ function rememberProcessedTweet(tweetId) {
 function scrapeTweets() {
   if (!chrome.runtime?.id) return;
   if (isReplying) return;
-  if (Date.now() < twitterCooldownUntil) return;
-  if (Date.now() < apiCooldownUntil) return;
 
   chrome.storage.local.get([
     'isRunning', 'isAutoPaused', 'aiPersona', 'agentMemory', 'competitorReport',
     'twitterCooldownUntil', 'apiCooldownUntil', 'onboardingStrategy', 'targetUsers',
-    'pendingReply', 'pendingPost', 'lastDiscoverySearchAt', 'discoverySearchIndex',
+    'pendingReply', 'pendingPost', 'isPosting', 'lastDiscoverySearchAt', 'discoverySearchIndex',
     'currentDiscoveryQuery', 'lastSurfaceNavigationAt',
-    'automationStartTime', 'sessionReplyCount', 'sessionPostCount', 'recentRepliedAuthors'
+    'automationStartTime', 'sessionReplyCount', 'sessionPostCount', 'recentRepliedAuthors',
+    'isGeneratingReply', 'isReplyTyping', 'isTyping', 'replyFlowLockUntil'
   ], (result) => {
     if (!result.isRunning) return;
+    if (hasActiveReplyFlow(result)) return;
+    if (hasActivePostFlow(result)) return;
+    if (maybeEscapeDeadEndSearch(result)) return;
+    if (Date.now() < twitterCooldownUntil) return;
+    if (Date.now() < apiCooldownUntil) return;
     if (result.isAutoPaused) {
       // Auto-heal: if isRunning is true but isAutoPaused is stale, clear it
       addLog('info', '检测到残留暂停标记，正在自动恢复...');
@@ -741,10 +1166,13 @@ function scrapeTweets() {
     if (result.apiCooldownUntil && Date.now() < result.apiCooldownUntil) return;
     
     // Legacy persona check removed since we now use reply strategy & custom prompts
-    if (maybeNavigateToHomeSurface(result, '当前页面不是推荐/搜索流')) return;
+    if (maybeNavigateToHomeSurface(result, automationMode === 'autoReply'
+      ? 'AutoReply 模式不使用关键词搜索，返回推荐页'
+      : '当前页面不是推荐/搜索流')) return;
     
     const articles = document.querySelectorAll('article[data-testid="tweet"]');
     if (articles.length === 0) {
+      if (!shouldUseKeywordDiscovery(automationMode)) return;
       maybeNavigateToDiscoverySearch(result, '当前页面没有可读推文', {
         force: isSearchPage()  // Empty search = rotate immediately
       });
@@ -794,7 +1222,12 @@ function scrapeTweets() {
       const opportunity = getReplyOpportunity(article, author, text, result);
       let effectiveMinScore = MIN_REPLY_OPPORTUNITY_SCORE;
       if (automationMode === 'autoReply' && (result.sessionReplyCount || 0) < 5) {
-        effectiveMinScore = 15; // Burst mode: lower threshold
+        // Burst mode: lower the bar slightly at the start of a session so it
+        // doesn't stall with zero candidates. Kept well above a bare
+        // "topicRelevant" match (+22 alone) so at least one more positive
+        // signal (freshness, engagement, target author, etc.) is still
+        // required — a single weak signal should not be enough to reply.
+        effectiveMinScore = 24;
       }
 
       if (opportunity.score < effectiveMinScore) {
@@ -807,6 +1240,7 @@ function scrapeTweets() {
     }
 
     if (candidates.length === 0) {
+      if (!shouldUseKeywordDiscovery(automationMode)) return;
       maybeNavigateToDiscoverySearch(result, '当前页面没有高质量高互动候选', {
         force: lowEngagementSkips >= 2
       });
@@ -820,14 +1254,24 @@ function scrapeTweets() {
     addLog('info', `选择互动 @${selected.author}: 机会分 ${selected.opportunity.score}（${selected.opportunity.reasons.join('、')}）`);
 
     isReplying = true;
-    chrome.storage.local.set({ isGeneratingReply: true });
+    stopAutoScroll();
+    startReplyFlowLocalLock();
+    applyReplyFlowEvent(ReplyFlowEvents.START_GENERATION, {
+      candidate: {
+        tweetAuthor: selected.author,
+        tweetContent: selected.text,
+        tweetStatusId: selected.tweetStatus.id,
+        tweetStatusHref: selected.tweetStatus.href,
+        startedAt: Date.now()
+      }
+    });
 
     const detectedOrigLang = detectOriginalLanguage(selected.article);
     if (detectedOrigLang) {
       addLog('info', `检测到 X 翻译：原始语言为 ${detectedOrigLang}`);
     }
 
-    chrome.runtime.sendMessage({
+    safeRuntimeSendMessage({
       action: 'generateReply',
       tweetText: selected.text,
       tweetContent: selected.text,
@@ -838,13 +1282,17 @@ function scrapeTweets() {
       replyOpportunity: selected.opportunity,
       originalLanguage: detectedOrigLang
     }, (response) => {
-      isReplying = false;
-      chrome.storage.local.set({ isGeneratingReply: false });
       if (chrome.runtime.lastError) {
+        isReplying = false;
+        clearReplyFlowLocalLock();
+        applyReplyFlowEvent(ReplyFlowEvents.GENERATION_FAILED, { reason: chrome.runtime.lastError.message });
         addLog('error', '生成回复失败: ' + chrome.runtime.lastError.message);
         return;
       }
       if (response && response.error) {
+        isReplying = false;
+        clearReplyFlowLocalLock();
+        applyReplyFlowEvent(ReplyFlowEvents.GENERATION_FAILED, { reason: response.error });
         addLog('error', 'AI 生成回复失败: ' + response.error);
         if (response.isApiCooldown) {
           apiCooldownUntil = Date.now() + 60000;
@@ -853,151 +1301,79 @@ function scrapeTweets() {
         return;
       }
       const replyText = response ? (response.replyText || response.reply) : '';
-      if (replyText) {
-        const willSend = shouldSendReply(automationMode);
-        
-        let dynamicCooldownMs = REPLY_COOLDOWN_MS;
-        if (willSend) {
-          dynamicCooldownMs = REPLY_ATTEMPT_LOCK_MS; // wait for automator to finish
-        } else {
-          let minMins = 12;
-          let maxMins = 20;
-          if (automationMode === 'autoEngage') {
-            minMins = 20;
-            maxMins = 30;
-          }
-          const randomMins = Math.floor(Math.random() * (maxMins - minMins + 1)) + minMins;
-          dynamicCooldownMs = randomMins * 60000;
+      if (!replyText) {
+        isReplying = false;
+        clearReplyFlowLocalLock();
+        applyReplyFlowEvent(ReplyFlowEvents.GENERATION_FAILED, { reason: 'empty_reply_text' });
+        return;
+      }
+      const willSend = shouldSendReply(automationMode);
+
+      let dynamicCooldownMs = REPLY_COOLDOWN_MS;
+      if (willSend) {
+        dynamicCooldownMs = REPLY_ATTEMPT_LOCK_MS; // wait for automator to finish
+      } else {
+        let minMins = 12;
+        let maxMins = 20;
+        if (automationMode === 'autoEngage') {
+          minMins = 20;
+          maxMins = 30;
         }
-        
-        twitterCooldownUntil = Date.now() + dynamicCooldownMs;
-        chrome.storage.local.set({
-          twitterCooldownUntil,
-          lastReplySuggestion: {
-            tweetAuthor: selected.author,
-            tweetContent: selected.text,
-            replyText,
-            mode: automationMode,
-            opportunityScore: selected.opportunity.score,
-            opportunityReasons: selected.opportunity.reasons,
-            time: Date.now()
-          }
-        });
+        const randomMins = Math.floor(Math.random() * (maxMins - minMins + 1)) + minMins;
+        dynamicCooldownMs = randomMins * 60000;
+      }
+
+      twitterCooldownUntil = Date.now() + dynamicCooldownMs;
+      const replyEvent = willSend
+        ? ReplyFlowEvents.GENERATION_READY_TO_SEND
+        : ReplyFlowEvents.GENERATION_SHADOW_DONE;
+      applyReplyFlowEvent(replyEvent, {}, {
+        twitterCooldownUntil,
+        lastReplySuggestion: {
+          tweetAuthor: selected.author,
+          tweetContent: selected.text,
+          replyText,
+          mode: automationMode,
+          opportunityScore: selected.opportunity.score,
+          opportunityReasons: selected.opportunity.reasons,
+          time: Date.now()
+        }
+      }, () => {
         addLog('success', willSend
           ? `已生成回复 @${selected.author}: ${replyText.substring(0, 40)}...`
           : `影子回复建议 @${selected.author}: ${replyText.substring(0, 40)}...`);
 
-        if (willSend) {
-          // Dispatch event for automator
-          window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
-            detail: {
-              tweetElementId: selected.tweetId,
-              replyText,
-              tweetAuthor: selected.author,
-              tweetContent: selected.text,
-              tweetStatusHref: selected.tweetStatus.href,
-              tweetStatusId: selected.tweetStatus.id,
-              automationMode
-            }
-          }));
+        if (!willSend) {
+          isReplying = false;
+          clearReplyFlowLocalLock();
+          return;
         }
-      }
+
+        setTimeout(() => {
+          isReplying = false;
+        }, 1000);
+        // Dispatch event for automator only after the cross-page lock is visible.
+        window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
+          detail: {
+            tweetElementId: selected.tweetId,
+            replyText,
+            tweetAuthor: selected.author,
+            tweetContent: selected.text,
+            tweetStatusHref: selected.tweetStatus.href,
+            tweetStatusId: selected.tweetStatus.id,
+            automationMode
+          }
+        }));
+      });
     });
   });
 }
 
 // ==========================================
-// Widget System & VibeX (VibeX) AI Pet
+// Runtime state used by page automation
 // ==========================================
 let botState = {};
-let logPanelOpen = false;
-let sidebarPanelOpen = false;
-let activeTab = 'tab-dashboard';
 let currentRewriteTweet = null;
-let selectedArchetype = 'ai_product_kol';
-let selectedStyle = 'concise';
-
-// VibeX Pet State
-let petBubbleText = "嗨！我是VibeX！点击我可以和我聊天，或者帮你分析推文哦~ 🚀";
-let petBubbleVisible = false;
-let petBubbleTimeout = null;
-let lastAnalyzedTweetId = "";
-let idleCounter = 0;
-
-// Dynamic Transparency Cache
-let transparentPetUrls = {
-  idle: "",
-  thinking: "",
-  happy: "",
-  writing: ""
-};
-
-// Canvas White-to-Transparent Processor
-function makeImageTransparent(url, callback) {
-  const img = new Image();
-  img.src = url;
-  img.onload = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    
-    try {
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imgData.data;
-      
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i+1];
-        const b = data[i+2];
-        
-        // If pixel is extremely close to pure white, feather its alpha to transparent
-        const minVal = Math.min(r, g, b);
-        if (minVal > 240) {
-          const diff = 255 - minVal; // range 0 to 15
-          const alpha = Math.floor((diff / 15) * 255);
-          data[i+3] = Math.min(data[i+3], alpha);
-        }
-      }
-      
-      ctx.putImageData(imgData, 0, 0);
-      callback(canvas.toDataURL("image/png"));
-    } catch (e) {
-      // CORS safety fallback
-      callback(url);
-    }
-  };
-  img.onerror = () => {
-    callback(url);
-  };
-}
-
-let transparentLogoUrl = "";
-
-function initTransparentPetImages() {
-  const assets = {
-    idle: chrome.runtime.getURL('assets/confi_idle.png'),
-    thinking: chrome.runtime.getURL('assets/confi_thinking.png'),
-    happy: chrome.runtime.getURL('assets/confi_happy.png'),
-    writing: chrome.runtime.getURL('assets/confi_writing.png')
-  };
-  
-  Object.keys(assets).forEach(key => {
-    if (transparentPetUrls[key]) return; // already cached
-    makeImageTransparent(assets[key], (dataUrl) => {
-      transparentPetUrls[key] = dataUrl;
-      renderWidget();
-    });
-  });
-
-  if (!transparentLogoUrl) {
-    makeImageTransparent(chrome.runtime.getURL('assets/icons/icon-48.png'), (dataUrl) => {
-      transparentLogoUrl = dataUrl;
-      renderWidget();
-    });
-  }
-}
 
 refreshBotStateFromStorage();
 
@@ -1010,383 +1386,45 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       stopAutoScroll();
       addLog('info', '自动操作已暂停，停止自动滚动');
     }
-    renderWidget();
+    if (
+      (changes.replyFlowLockUntil || changes.isGeneratingReply || changes.isReplyTyping || changes.isTyping || changes.pendingReply || changes.pendingPost || changes.isPosting)
+      && botState.isRunning
+      && !botState.isAutoPaused
+      && !hasActiveReplyFlow(botState)
+      && !hasActivePostFlow(botState)
+    ) {
+      startAutoScroll();
+    }
+    if (changes.engineLanguage) {
+      document.querySelectorAll('.x-bot-collect-btn-wrapper').forEach(node => node.remove());
+      injectCollectButtons();
+    }
   }
 });
-
-function ensureWidget() {
-  if (!chrome.runtime?.id) return;
-  let widget = document.getElementById('x-auto-bot-widget');
-  if (!botState.isRunning) {
-    if (!widget) renderWidget();
-    return;
-  }
-  if (!widget) {
-    renderWidget();
-  } else if (widget.classList.contains('hidden')) {
-    widget.classList.remove('hidden');
-  }
-  
-  // 确保对话框 DOM 存在并预载透明资源
-  if (botState.petEnabled !== false) {
-    initTransparentPetImages();
-    ensureChatConsole();
-  } else {
-    // 强制关闭对话框
-    const consoleEl = document.getElementById('x-auto-bot-chat-console');
-    if (consoleEl) consoleEl.classList.add('hidden');
-  }
-}
-
-function formatLogTime(ts) {
-  const d = new Date(ts);
-  return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
-}
-
-function isResultLog(log = {}) {
-  const message = String(log.message || '');
-  if (/跳过推文抓取|不启动自动滚动|停止自动滚动|跳过发推调度|跳过本次发推|跳过发推|跳过 intent 回复|机器人已停止|用户手动恢复/.test(message)) {
-    return false;
-  }
-  if (/跳过低价值互动目标|互动机会分 .*低于|主题与账号策略不相关|非优先互动账号|未读取到推文 status id/.test(message)) {
-    return false;
-  }
-  const resultPatterns = [
-    /已通过 X 官方 intent 回复/,
-    /X 提示已回复过/,
-    /X 提示这条内容已发布过/,
-    /确认已回复/,
-    /已回复 @/,
-    /队列推文发送成功/,
-    /测试推文发送成功/,
-    /定时推文发送成功/,
-    /X 原生定时发布(创建|写入)成功/,
-    /已发 \d+ 条/,
-    /已跳过/,
-    /跳过 @/,
-    /自动操作已暂停/,
-    /已暂停/,
-    /未确认成功/,
-    /发送失败/,
-    /发推失败/,
-    /回复失败/
-  ];
-  return resultPatterns.some(pattern => pattern.test(message));
-}
-
-function formatResultLogMessage(log = {}) {
-  const message = String(log.message || '');
-  return message
-    .replace(/^✅\s*/, '')
-    .replace(/^⚠️\s*/, '')
-    .replace(/，进入 \d+ 分钟互动冷却$/, '')
-    .replace(/：检测到 X 发送成功提示$/, '')
-    .replace(/：编辑器已关闭$/, '')
-    .trim();
-}
-
-function getLevelEmoji(level) {
-  switch (level) {
-    case 'success': return '✅';
-    case 'warn': return '⚠️';
-    case 'error': return '❌';
-    default: return 'ℹ️';
-  }
-}
-
-function getWidgetConfigErrors(state) {
-  const errors = [];
-  if (!state.apiKey) errors.push('API Key');
-  if (!state.leadTarget) errors.push('引流目标');
-  if (state.apiProvider && state.apiProvider !== 'gemini' && !state.aiModel) errors.push('模型名称');
-  return errors;
-}
 
 function refreshBotStateFromStorage() {
   if (!chrome.runtime?.id) return;
   chrome.storage.local.get(null, (res) => {
     botState = res || {};
-    renderWidget();
   });
 }
 
-// 检查 X 页面当前是否处于暗黑/深色模式
-function isXDarkMode() {
-  const bg = window.getComputedStyle(document.body).backgroundColor;
-  if (bg && (bg.includes('rgb(21,') || bg.includes('rgb(0,') || bg.includes('rgb(15,'))) {
-    return true;
-  }
-  return false;
+function removeLegacyWidgetDom() {
+  document.getElementById('x-auto-bot-widget')?.remove();
+  document.getElementById('x-auto-bot-chat-console')?.remove();
 }
 
-// 检查是否有新的回复建议并触发气泡
-function checkNewSuggestions() {
-  const suggest = botState.lastReplySuggestion;
-  if (suggest && Date.now() - suggest.time < 12000 && suggest.tweetContent !== lastAnalyzedTweetId) {
-    lastAnalyzedTweetId = suggest.tweetContent;
-    const tweetAuthor = suggest.tweetAuthor || "未知用户";
-    const textExcerpt = suggest.tweetContent.substring(0, 24) + "...";
-    
-    if (botState.petPersonality === 'hacker') {
-      petBubbleText = `🔥 发现截流机会！对标 @${tweetAuthor} 的推文：「${textExcerpt}」。快点击我查看 AI 回复建议！`;
-    } else {
-      petBubbleText = `✨ 哇！@${tweetAuthor} 刚发了一条有意思的推文：「${textExcerpt}」。我为主人准备了绝佳的评论建议，快点击我看看吧~`;
-    }
-    triggerPetBubble(9000);
-  }
-}
-
-// 定期进行宠物闲聊气泡
-function checkIdleChat() {
-  if (petBubbleVisible) return;
-  idleCounter++;
-  if (idleCounter < 45) return;
-  idleCounter = 0;
-  
-  if (Math.random() < 0.4) {
-    const explorerPhrases = [
-      "VibeX 的星辰大海真是太美妙了！🌌 我们一起探索吧！",
-      "今天的增长计划在稳步前进哦！要不要写一条关于 Web3 的推文？",
-      "VibeX探测器已锁定！你可以随时点我让我帮你写推文哦~ ✨",
-      "VibeX今天也在努力学习新姿势，主人今天有什么新想法吗？📝",
-      "如果你看到好玩的推文，点开我的聊天面板，让我帮你吐槽！💬"
-    ];
-    
-    const hackerPhrases = [
-      "时间就是粉丝！主人，快来发帖冲数据！📈",
-      "今天还没有新增回复，搞钱搞钱！💰 点我快速分析热门推文！",
-      "让我来帮你写一条带节奏的爆款推文吧！点击聊天即可开始！🎯",
-      "截流的本质是提供更高的信息增量。来，让VibeX帮你出谋划策！",
-      "对标账号又有新动作了？赶紧让我来解构一下他们的爆款逻辑！"
-    ];
-    
-    const phrases = botState.petPersonality === 'hacker' ? hackerPhrases : explorerPhrases;
-    petBubbleText = phrases[Math.floor(Math.random() * phrases.length)];
-    triggerPetBubble(6000);
-  }
-}
-
-// 气泡控制
-function triggerPetBubble(duration = 5000) {
-  petBubbleVisible = true;
-  clearTimeout(petBubbleTimeout);
-  
-  const bubble = document.getElementById('x-bot-pet-bubble');
-  const bubbleText = document.getElementById('x-bot-pet-bubble-text');
-  if (bubble && bubbleText) {
-    bubbleText.textContent = petBubbleText;
-    bubble.classList.add('show');
-  }
-  
-  petBubbleTimeout = setTimeout(() => {
-    petBubbleVisible = false;
-    const bubble = document.getElementById('x-bot-pet-bubble');
-    if (bubble) {
-      bubble.classList.remove('show');
-    }
-  }, duration);
-}
-
-// 切换对话框显示
-function toggleChatConsole() {
-  const consoleEl = document.getElementById('x-auto-bot-chat-console');
-  if (!consoleEl) return;
-  
-  const isHidden = consoleEl.classList.contains('hidden');
-  if (isHidden) {
-    // 隐藏气泡
-    const bubble = document.getElementById('x-bot-pet-bubble');
-    if (bubble) bubble.classList.remove('show');
-    petBubbleVisible = false;
-    clearTimeout(petBubbleTimeout);
-
-    consoleEl.classList.remove('hidden');
-    updateChatConsoleTheme();
-    renderChatConsoleMessages();
-    
-    setTimeout(() => {
-      const body = consoleEl.querySelector('.x-chat-body');
-      const __body = document.querySelector('.x-bot-chat-body');
-      if (__body) __body.scrollTop = __body.scrollHeight;
-    }, 100);
-  } else {
-    consoleEl.classList.add('hidden');
-  }
-}
-
-function setupChatTab() {
-  const sendBtn = document.getElementById('x-chat-send-btn');
-  const textarea = document.getElementById('x-chat-textarea');
-  
-  const triggerSend = () => {
-    const text = textarea.value;
-    if (text.trim()) {
-      sendChatMessage(text);
-      textarea.value = '';
-      textarea.style.height = 'auto';
-    }
-  };
-  
-  if(sendBtn) sendBtn.addEventListener('click', triggerSend);
-  if(textarea) textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      triggerSend();
-    }
-  });
-  
-  if(textarea) textarea.addEventListener('input', () => {
-    textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(80, textarea.scrollHeight)}px`;
-  });
-  
-  const qbtnWrite = document.getElementById('qbtn-write');
-  if(qbtnWrite) qbtnWrite.addEventListener('click', () => {
-    textarea.value = "帮我写一条关于最新产品/AI/Web3进展的爆款推文：";
-    textarea.focus();
-    textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(80, textarea.scrollHeight)}px`;
-  });
-  
-  const qbtnAnalyze = document.getElementById('qbtn-analyze');
-  if(qbtnAnalyze) qbtnAnalyze.addEventListener('click', () => {
-    const tweet = getCenterVisibleTweet();
-    if (!tweet) {
-      alert("未发现可见推文，请将推文滚动到中心");
-      return;
-    }
-    sendChatMessage(`请帮我深度分析这条推文并给出回复建议：\n\n作者：@${tweet.author}\n内容：${tweet.text}`);
-  });
-  
-  const qbtnSummary = document.getElementById('qbtn-summary');
-  if(qbtnSummary) qbtnSummary.addEventListener('click', () => {
-    sendChatMessage("请帮我汇总今日战绩并给出建议！");
-  });
-  
-  renderChatConsoleMessages();
-}
-
-// 渲染对话列表
-function renderChatConsoleMessages() {
-  const messagesContainer = document.getElementById('x-bot-chat-body');
-  if (!messagesContainer) return;
-  
-  const messages = botState.agentChatMessages || [];
-  
-  if (messages.length === 0) {
-    const greetingText = botState.petPersonality === 'hacker'
-      ? "喂！终于舍得点我啦？我是VibeX！快把好推文、选题或者想法发给我，让我这个增长专家帮你搞定一切！📈"
-      : "嗨！主人！我是VibeX，你的专属增长助手！🚀 无论是要写推文、吐槽热门话题，还是更新长期记忆，快对我说吧！✨";
-      
-    messagesContainer.innerHTML = `
-      <div class="x-bot-chat-msg-row assistant">
-        <span class="x-bot-chat-msg-label">VibeX</span>
-        <div class="x-bot-chat-msg-bubble">${escapeHtml(greetingText)}</div>
-      </div>
-    `;
-    return;
-  }
-  
-  messagesContainer.innerHTML = messages.map(msg => {
-    const isUser = msg.role === 'user';
-    const label = isUser ? "你" : "VibeX";
-    const rowClass = isUser ? "user" : "assistant";
-    return `
-      <div class="x-bot-chat-msg-row ${rowClass}">
-        <span class="x-bot-chat-msg-label">${label}</span>
-        <div class="x-bot-chat-msg-bubble">${escapeHtml(msg.content)}</div>
-      </div>
-    `;
-  }).join('');
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
-}
-
-// 显示思考动画
-function showChatTypingIndicator(show) {
-  const messagesContainer = document.getElementById('x-bot-chat-body');
-  if (!messagesContainer) return;
-  
-  const existing = messagesContainer.querySelector('.x-chat-typing-row');
-  if (existing) existing.remove();
-  
-  if (show) {
-    const typingRow = document.createElement('div');
-    typingRow.className = 'x-bot-chat-msg-row assistant x-chat-typing-row';
-    typingRow.innerHTML = `
-      <span class="x-bot-chat-msg-label">${tUI('VibeX正在思考...')}</span>
-      <div class="x-bot-chat-msg-bubble x-chat-typing" style="display:flex;">
-        <div class="x-bot-chat-typing-dot"></div>
-        <div class="x-bot-chat-typing-dot"></div>
-        <div class="x-bot-chat-typing-dot"></div>
-      </div>
-    `;
-    messagesContainer.appendChild(typingRow);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-  }
-}
-
-// 对话框暗黑模式更新
-function updateChatConsoleTheme() {
-  const consoleEl = document.getElementById('x-auto-bot-chat-console');
-  if (!consoleEl) return;
-  if (isXDarkMode()) {
-    consoleEl.classList.add('x-bot-dark');
-  } else {
-    consoleEl.classList.remove('x-bot-dark');
-  }
-}
-
-// 发送消息到 Agent 后台
-function sendChatMessage(text) {
-  if (!text.trim()) return;
-  
-  const messages = botState.agentChatMessages || [];
-  const userEntry = { role: 'user', content: text, time: Date.now() };
-  botState.agentChatMessages = [...messages, userEntry];
-  renderChatConsoleMessages();
-  
-  showChatTypingIndicator(true);
-  
-  const petImg = document.getElementById('x-bot-pet-img');
-  if (petImg) {
-    // 强制转换为 thinking state
-    petImg.src = transparentPetUrls.thinking || chrome.runtime.getURL('assets/confi_thinking.png');
-  }
-  
-  chrome.runtime.sendMessage({ action: 'agentChat', message: text }, (response) => {
-    showChatTypingIndicator(false);
-    
-    if (petImg) {
-      // 重新计算并加载状态图片
-      const isGenerating = botState.isGenerating || botState.isAnalyzingPersona || botState.isAnalyzingCompetitors;
-      const petState = isGenerating ? 'thinking' : 'idle';
-      petImg.src = transparentPetUrls[petState] || chrome.runtime.getURL(`assets/confi_${petState}.png`);
-    }
-    
-    if (chrome.runtime.lastError || !response?.success) {
-      const errorText = chrome.runtime.lastError?.message || response?.error || "消息发送失败，请检查配置";
-      const errorEntry = { role: 'assistant', content: `❌ VibeX好像断网了：${errorText}`, time: Date.now() };
-      botState.agentChatMessages = [...botState.agentChatMessages, errorEntry];
-      renderChatConsoleMessages();
-      const __body = document.querySelector('.x-bot-chat-body');
-      if (__body) __body.scrollTop = __body.scrollHeight;
-      return;
-    }
-    
-    botState.agentChatMessages = response.messages || [];
-    renderChatConsoleMessages();
-  });
-}
+removeLegacyWidgetDom();
 
 // 获取当前视野最中心的推文
 function getCenterVisibleTweet() {
   const articles = document.querySelectorAll('article[data-testid="tweet"]');
   if (articles.length === 0) return null;
-  
+
   let closestArticle = null;
   let minDistance = Infinity;
   const centerY = window.innerHeight / 2;
-  
+
   for (const article of articles) {
     const rect = article.getBoundingClientRect();
     const articleCenterY = rect.top + rect.height / 2;
@@ -1396,7 +1434,7 @@ function getCenterVisibleTweet() {
       closestArticle = article;
     }
   }
-  
+
   if (closestArticle) {
     const status = getTweetStatusMeta(closestArticle);
     const author = getTweetAuthor(closestArticle) || "未知用户";
@@ -1407,422 +1445,11 @@ function getCenterVisibleTweet() {
   return null;
 }
 
-// 确保对话框 DOM 绑定与生成
-function ensureChatConsole() {
-  if (!chrome.runtime?.id) return;
-  let consoleEl = document.getElementById('x-auto-bot-chat-console');
-  if (!consoleEl) {
-    consoleEl = document.createElement('div');
-    consoleEl.id = 'x-auto-bot-chat-console';
-    consoleEl.className = 'hidden';
-    document.body.appendChild(consoleEl);
-    
-    const avatarUrl = chrome.runtime.getURL('assets/icons/icon-128.png');
-    consoleEl.innerHTML = `
-      <div class="x-chat-header">
-        <div class="x-chat-title-area">
-          <div class="x-chat-avatar" style="background: transparent;">
-            <img src="${avatarUrl}" id="x-chat-avatar-img" alt="VibeX" style="width: 100%; height: 100%; object-fit: contain; border-radius: 50%;">
-          </div>
-          <div>
-            <div class="x-chat-title">VibeX 智能助手</div>
-            <div class="x-chat-subtitle">VibeX AI Core</div>
-          </div>
-        </div>
-        <button class="x-chat-close-btn" id="x-chat-close-btn">&times;</button>
-      </div>
-      
-      <div class="x-chat-body"></div>
-      
-      <div class="x-chat-quick-actions">
-        <button class="x-chat-quick-btn" id="qbtn-write">✍️ 帮我写推文</button>
-        <button class="x-chat-quick-btn" id="qbtn-analyze">🎯 分析当前推文</button>
-        <button class="x-chat-quick-btn" id="qbtn-summary">📊 汇报今日进展</button>
-      </div>
-      
-      <div class="x-chat-composer">
-        <textarea class="x-chat-textarea" id="x-chat-textarea" rows="1" placeholder="和VibeX聊聊..."></textarea>
-        <button class="x-chat-send-btn" id="x-chat-send-btn">
-          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-        </button>
-      </div>
-    `;
-    
-    consoleEl.querySelector('#x-chat-close-btn').addEventListener('click', toggleChatConsole);
-    
-    const sendBtn = consoleEl.querySelector('#x-chat-send-btn');
-    const textarea = consoleEl.querySelector('#x-chat-textarea');
-    
-    const triggerSend = () => {
-      const text = textarea.value;
-      if (text.trim()) {
-        sendChatMessage(text);
-        textarea.value = '';
-        textarea.style.height = 'auto';
-      }
-    };
-    
-    sendBtn.addEventListener('click', triggerSend);
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        triggerSend();
-      }
-    });
-    
-    textarea.addEventListener('input', () => {
-      textarea.style.height = 'auto';
-      textarea.style.height = `${Math.min(80, textarea.scrollHeight)}px`;
-    });
-    
-    consoleEl.querySelector('#qbtn-write').addEventListener('click', () => {
-      textarea.value = "帮我写一条关于最新产品/AI/Web3进展的爆款推文：";
-      textarea.focus();
-      textarea.style.height = 'auto';
-      textarea.style.height = `${Math.min(80, textarea.scrollHeight)}px`;
-    });
-    
-    consoleEl.querySelector('#qbtn-analyze').addEventListener('click', () => {
-      const tweet = getCenterVisibleTweet();
-      if (!tweet) {
-        alert("未在当前屏幕中心发现可见推文，请将一条推文滚动到屏幕中心后再试！");
-        return;
-      }
-      const prompt = `请帮我深度分析下面这条推文的亮点、爆款元素，并给出一个高价值回复建议：\n\n作者：@${tweet.author}\n内容：${tweet.text}`;
-      sendChatMessage(prompt);
-    });
-    
-    consoleEl.querySelector('#qbtn-summary').addEventListener('click', () => {
-      const prompt = "请帮我汇总今日的增长战绩并给出一个简短的鼓励 and 建议！";
-      sendChatMessage(prompt);
-    });
-  }
-  
-  const avatarImg = consoleEl.querySelector('#x-chat-avatar-img');
-  if (avatarImg) {
-    const isGenerating = botState.isGenerating || botState.isAnalyzingPersona || botState.isAnalyzingCompetitors;
-    if (isGenerating) {
-      avatarImg.style.animation = 'x-chat-typing 1.4s infinite ease-in-out both';
-    } else {
-      avatarImg.style.animation = 'none';
-    }
-  }
-}
-
-function renderWidget() {
-  const oldWidget = document.getElementById('x-auto-bot-widget');
-  if (oldWidget) oldWidget.remove();
-  
-  if (sidebarPanelOpen && activeTab === 'tab-dashboard') {
-    renderDashboardTab();
-  }
-}
-
-window.toggleBotState = function() {
-  const newState = !botState.isRunning;
-  chrome.runtime.sendMessage({ action: 'toggleBot', state: newState }, (res) => {
-    if(res && res.success) {
-      botState.isRunning = newState;
-      renderDashboardTab();
-    }
-  });
-};
-
-function renderDashboardTab() {
-  const container = document.getElementById('x-bot-dashboard-content');
-  if (!container) return;
-  
-  const isRunning = !!botState.isRunning;
-  const statusLabel = isRunning ? "运行中" : "已停止";
-  const statusClass = isRunning ? "active" : "idle";
-  const btnText = isRunning ? "停止 Agent" : "启动 Agent";
-  const btnClass = isRunning ? "x-bot-btn-main stop" : "x-bot-btn-main";
-  
-  const progress = botState.profileReadProgress || {};
-  const isProfileDone = progress.stage === 'extracted';
-  const hasPersona = !!(botState.aiPersona && (botState.aiPersona.targetUsers || botState.aiPersona.characteristics));
-  const hasCompetitor = !!botState.competitorReport;
-  const draftStatus = botState.xOfficialDraftStatus === 'success' ? '已读取' : (botState.xOfficialDraftStatus === 'reading' ? '读取中' : '未读取');
-  
-  const postsToday = Number(botState.postsToday) || 0;
-  const repliesSent = botState.stats ? botState.stats.repliesSent : 0;
-  const nextPostStr = botState.nextPostTime ? botState.nextPostTime : '等待中';
-  
-  let focusStatus = isRunning ? "正在执行自动化监控" : "待启动：点击上方按钮启动 Agent";
-  if (isRunning) {
-    if (botState.isTyping) focusStatus = "正在向 X 原生界面打字...";
-    else if (botState.isGeneratingReply) focusStatus = "正在生成互动回复策略...";
-    else if (botState.isAnalyzingPersona) focusStatus = "正在分析账号特征与受众...";
-    else if (botState.isGenerating) focusStatus = "正在生成新推文...";
-  }
-
-  const personaRole = botState.aiPersona?.characteristics || "未定义";
-  const personaReader = botState.aiPersona?.targetUsers || "未定义";
-  const personaTopics = (botState.aiPersona?.contentTopics || []).join(' ') || "未定义";
-
-  container.innerHTML = `
-    <div class="x-bot-dash-card">
-      <div class="x-bot-dash-header" style="margin-bottom: 20px;">
-        <div style="display:flex;align-items:center;">
-          <span class="x-bot-dash-status-dot ${statusClass}"></span>
-          <span style="font-weight:700;font-size:15px;color:#0f172a;">${statusLabel}</span>
-        </div>
-      </div>
-      <button class="${btnClass}" onclick="toggleBotState()">${btnText}</button>
-    </div>
-
-    <div class="x-bot-dash-card">
-      <div class="x-bot-dash-header">
-        <span class="x-bot-dash-title" style="color:#1d9bf0;">CURRENT FOCUS</span>
-      </div>
-      <div style="font-weight:700; color:#0f172a; margin-bottom: 16px; font-size:14px;">${focusStatus}</div>
-      <div class="x-bot-dash-milestone ${isProfileDone ? 'done' : ''}">读取主页简介</div>
-      <div class="x-bot-dash-milestone ${hasPersona ? 'done' : ''}">人设与目标用户</div>
-      <div class="x-bot-dash-milestone ${hasCompetitor ? 'done' : ''}">竞品与爆款框架</div>
-      <div class="x-bot-dash-milestone ${draftStatus==='已读取' ? 'done' : ''}">X 官方草稿 (${draftStatus})</div>
-    </div>
-
-    <div class="x-bot-dash-card">
-      <div class="x-bot-dash-header">
-        <span class="x-bot-dash-title">今日发声计划 & 成果</span>
-      </div>
-      <div class="x-bot-dash-grid">
-        <div class="x-bot-dash-stat">
-          <div class="x-bot-dash-stat-label">下次发布</div>
-          <div class="x-bot-dash-stat-val" style="font-size:12px;">${nextPostStr}</div>
-        </div>
-        <div class="x-bot-dash-stat">
-          <div class="x-bot-dash-stat-label">今日发帖 / 回复</div>
-          <div class="x-bot-dash-stat-val">${postsToday} / ${repliesSent}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="x-bot-dash-card">
-      <div class="x-bot-dash-header">
-        <span class="x-bot-dash-title">AI 增长策略信号</span>
-        <span class="x-bot-chip" style="background:#eff6ff;color:#1d9bf0;border-color:#bfdbfe;font-weight:700;">Strategy</span>
-      </div>
-      <div class="x-bot-dash-signal">
-        <div class="x-bot-dash-signal-row">
-          <span class="x-bot-dash-signal-label">角色</span>
-          <span class="x-bot-dash-signal-val" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${personaRole}</span>
-        </div>
-        <div class="x-bot-dash-signal-row">
-          <span class="x-bot-dash-signal-label">读者</span>
-          <span class="x-bot-dash-signal-val" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${personaReader}</span>
-        </div>
-        <div class="x-bot-dash-signal-row" style="border:none;">
-          <span class="x-bot-dash-signal-label">飞轮</span>
-          <span class="x-bot-dash-signal-val" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${personaTopics}</span>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 function injectStyles() {
-  if (document.getElementById('x-bot-injected-styles')) return;
-  const style = document.createElement('style');
-  style.id = 'x-bot-injected-styles';
+  if (document.getElementById("x-bot-injected-styles")) return;
+  const style = document.createElement("style");
+  style.id = "x-bot-injected-styles";
   style.textContent = `
-
-    /* --- PIXEL ART STYLES --- */
-
-    /* --- TOGGLE SWITCH --- */
-    .x-bot-toggle-switch input:checked + span {
-      background-color: #10b981;
-    }
-    .x-bot-toggle-switch input:checked + span .x-bot-toggle-slider {
-      transform: translateX(20px);
-    }
-
-    .x-bot-sidebar-vertical-nav {
-      width: 70px;
-      background: #f8fafc;
-      border-left: 2px solid #000;
-      border-right: 2px solid #000;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding-top: 16px;
-      gap: 16px;
-      box-sizing: border-box;
-      z-index: 10;
-    }
-    .x-bot-sidebar-tab {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      padding: 8px 4px;
-      width: 50px;
-      border-radius: 8px;
-      border: 2px solid transparent;
-      color: #64748b;
-      transition: all 0.2s;
-    }
-    .x-bot-sidebar-tab:hover { background: #e2e8f0; }
-    .x-bot-sidebar-tab.active {
-      background: #ffffff;
-      border: 2px solid #000;
-      color: #000;
-      box-shadow: 2px 2px 0px #000;
-    }
-    .x-bot-nav-icon { font-size: 20px; margin-bottom: 4px; }
-    .x-bot-nav-text { font-size: 11px; font-weight: 700; font-family: 'Courier New', Courier, monospace; }
-
-    /* Pixel Chat Banner */
-    .x-bot-pixel-banner {
-      background: #ffffff;
-      border: 2px solid #000;
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 8px;
-      box-shadow: 2px 2px 0px #000;
-    }
-    .x-bot-pixel-banner-top {
-      display: flex;
-      align-items: center;
-      padding: 8px 12px;
-      border-bottom: 2px solid #000;
-      background: #f8fafc;
-    }
-    .x-bot-pixel-avatar {
-      width: 40px; height: 40px;
-      border: 2px solid #000;
-      border-radius: 4px;
-      background: #fff;
-      margin-right: 12px;
-      overflow: hidden;
-    }
-    .x-bot-pixel-avatar img { width:100%; height:100%; object-fit:cover; }
-    .x-bot-pixel-info { flex: 1; }
-    .x-bot-pixel-name { font-size: 14px; color: #000; }
-    .x-bot-pixel-level { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-    .x-bot-pixel-bar { width: 60px; height: 8px; border: 2px solid #000; background: #fff; border-radius: 2px; }
-    .x-bot-pixel-bar-inner { width: 60%; height: 100%; background: #10b981; }
-    .x-bot-pixel-btn {
-      background: #ffffff;
-      border: 2px solid #000;
-      border-radius: 4px;
-      padding: 4px 8px;
-      font-size: 12px;
-      font-weight: 900;
-      font-family: 'Courier New', Courier, monospace;
-      box-shadow: 1px 1px 0px #000;
-      cursor: pointer;
-    }
-    .x-bot-pixel-btn:active { transform: translate(1px, 1px); box-shadow: 0 0 0 #000; }
-    
-    .x-bot-pixel-scene {
-      height: 120px;
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-end;
-    }
-    .x-bot-pixel-pet-model {
-      height: 70px;
-      object-fit: contain;
-      image-rendering: pixelated;
-    }
-    .x-bot-pixel-bubble {
-      background: #fff;
-      border: 2px solid #000;
-      padding: 6px 10px;
-      border-radius: 8px;
-      position: absolute;
-      top: 15px;
-      color: #000;
-    }
-    .x-bot-pixel-bubble::after {
-      content: '';
-      position: absolute;
-      bottom: -6px;
-      left: 50%;
-      transform: translateX(-50%);
-      border-width: 6px 6px 0;
-      border-style: solid;
-      border-color: #000 transparent transparent transparent;
-    }
-    
-    .x-bot-pixel-action-btn {
-      background: #fff;
-      border: 2px solid #000;
-      color: #000;
-      padding: 6px 12px;
-      font-size: 12px;
-      font-weight: bold;
-      border-radius: 6px;
-      cursor: pointer;
-      box-shadow: 1px 1px 0px #000;
-    }
-    .x-bot-pixel-action-btn:hover { background: #f8fafc; }
-    
-    .x-bot-pixel-textarea {
-      flex: 1;
-      border: 2px solid #000;
-      border-radius: 8px;
-      padding: 10px;
-      font-family: 'Courier New', Courier, monospace;
-      resize: none;
-      box-shadow: 2px 2px 0px rgba(0,0,0,0.1);
-    }
-    .x-bot-pixel-send {
-      width: 40px; height: 40px;
-      background: #000;
-      color: #fff;
-      border: 2px solid #000;
-      border-radius: 8px;
-      font-size: 18px;
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-    }
-    
-    /* Modify Chat Bubble */
-    .x-bot-chat-msg-row { display: flex; flex-direction: column; margin-bottom: 8px; }
-    .x-bot-chat-msg-row.user { align-items: flex-end; }
-    .x-bot-chat-msg-row.assistant { align-items: flex-start; }
-    .x-bot-chat-msg-label { font-size: 11px; color: #64748b; margin-bottom: 4px; font-family: 'Courier New', Courier, monospace; font-weight: bold; }
-    .x-bot-chat-msg-bubble {
-      padding: 12px 16px;
-      border-radius: 16px;
-      font-size: 14px;
-      color: #0f172a;
-      max-width: 90%;
-      line-height: 1.5;
-    }
-    .x-bot-chat-msg-row.user .x-bot-chat-msg-bubble {
-      background: #334155;
-      color: #fff;
-      border-bottom-right-radius: 4px;
-    }
-    .x-bot-chat-msg-row.assistant .x-bot-chat-msg-bubble {
-      background: #f1f5f9;
-      border-bottom-left-radius: 4px;
-      border: 2px solid #e2e8f0;
-    }
-    
-    /* Pixelated Dashboard Cards */
-    
-    .x-bot-btn-main {
-      background: #fff;
-      border: 2px solid #000;
-      color: #000;
-      box-shadow: 2px 2px 0px #000;
-      text-transform: uppercase;
-      font-family: 'Courier New', Courier, monospace;
-      font-weight: 900;
-    }
-    .x-bot-btn-main.stop {
-      background: #ef4444; color: #fff; border-color: #000;
-    }
-    .x-bot-btn-main:active { transform: translate(2px, 2px); box-shadow: 0 0 0 #000; }
-
-    /* X action bar collect button */
     .x-bot-collect-btn-wrapper {
       display: flex;
       flex-direction: row;
@@ -1840,7 +1467,7 @@ function injectStyles() {
       gap: 6px;
       padding: 0 12px;
       height: 28px;
-      border-radius: 99px;
+      border-radius: 999px;
       border: 1px solid rgba(29, 155, 240, 0.3);
       background: rgba(29, 155, 240, 0.05);
       color: #1d9bf0;
@@ -1849,6 +1476,7 @@ function injectStyles() {
       cursor: pointer;
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       outline: none;
+      white-space: nowrap;
     }
     .x-bot-collect-btn:hover {
       background: #1d9bf0;
@@ -1860,31 +1488,6 @@ function injectStyles() {
       width: 17px;
       height: 17px;
     }
-    
-    .x-bot-tooltip {
-      position: absolute;
-      bottom: -32px;
-      left: 50%;
-      transform: translateX(-50%) scale(0.9);
-      background: rgba(15, 23, 42, 0.95);
-      color: #ffffff;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 11px;
-      white-space: nowrap;
-      opacity: 0;
-      pointer-events: none;
-      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-      z-index: 100000;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      border: 1px solid rgba(255,255,255,0.08);
-    }
-    .x-bot-collect-btn-wrapper:hover .x-bot-tooltip {
-      opacity: 1;
-      transform: translateX(-50%) scale(1);
-    }
-    
-    /* Sleek toast container */
     #x-bot-toast-container {
       position: fixed;
       top: 24px;
@@ -1897,6 +1500,7 @@ function injectStyles() {
     }
     .x-bot-toast {
       min-width: 285px;
+      max-width: min(420px, calc(100vw - 48px));
       padding: 14px 20px;
       border-radius: 12px;
       background: rgba(15, 23, 42, 0.85);
@@ -1904,7 +1508,7 @@ function injectStyles() {
       border: 1px solid rgba(255, 255, 255, 0.1);
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
       color: #f8fafc;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
       font-size: 14px;
       font-weight: 500;
       display: flex;
@@ -1914,618 +1518,77 @@ function injectStyles() {
       transform: translateX(120%) scale(0.9);
       opacity: 0;
       transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      word-break: break-word;
     }
     .x-bot-toast.show {
       transform: translateX(0) scale(1);
       opacity: 1;
     }
-    .x-bot-toast.success {
-      border-left: 4px solid #10b981;
+    .x-bot-toast.success { border-left: 4px solid #10b981; }
+    .x-bot-toast.error { border-left: 4px solid #ef4444; }
+    .x-bot-toast.info { border-left: 4px solid #3b82f6; }
+    @media (max-width: 520px) {
+      #x-bot-toast-container { left: 16px; right: 16px; top: 16px; }
+      .x-bot-toast { min-width: 0; width: 100%; }
+      .x-bot-collect-btn { padding: 0 9px; font-size: 11px; }
     }
-    .x-bot-toast.error {
-      border-left: 4px solid #ef4444;
-    }
-    .x-bot-toast.info {
-      border-left: 4px solid #3b82f6;
-    }
-    
-    /* Monica-Style Sidebar Panel */
-
-
-    #x-bot-sidebar-container {
-      position: fixed;
-      top: 0;
-      right: 0;
-      width: 0;
-      height: 100vh;
-      z-index: 999999;
-      pointer-events: none;
-    }
-
-    .x-bot-sidebar-toggle-btn {
-      position: absolute;
-      top: 50%;
-      left: -40px;
-      transform: translateY(-50%);
-      width: 40px;
-      height: 140px;
-      background: #ffffff;
-      border: 2px solid #000;
-      border-right: none;
-      border-radius: 12px 0 0 12px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      box-shadow: -4px 4px 0px rgba(0,0,0,1);
-      z-index: 999999;
-      font-weight: bold;
-      font-size: 14px;
-      transition: all 0.2s;
-    }
-    .x-bot-sidebar-toggle-btn:hover {
-      background: #f8fafc;
-      color: #1d9bf0;
-      left: -44px;
-    }
-
-    /* Sidebar is fixed on the right, pushing body left */
-    #x-bot-sidebar-panel {
-      position: fixed;
-      top: 0;
-      right: -450px;
-      width: 450px;
-      height: 100vh;
-      background: rgba(255, 255, 255, 0.98);
-      backdrop-filter: blur(20px);
-      border-left: 1px solid rgba(0, 0, 0, 0.08);
-      box-shadow: -8px 0 30px rgba(0, 0, 0, 0.08);
-      transition: right 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-      pointer-events: auto;
-      display: flex;
-      flex-direction: column;
-      color: #0f172a;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      z-index: 999999;
-    }
-    #x-bot-sidebar-panel.open {
-      right: 0;
-    }
-
-    /* Tabs Header */
-    .x-bot-sidebar-header {
-      padding: 20px 20px 0 20px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-    }
-    .x-bot-sidebar-title {
-      font-size: 18px;
-      font-weight: 800;
-      margin: 0 0 16px 0;
-      color: #1d9bf0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .x-bot-sidebar-close {
-      cursor: pointer;
-      color: #94a3b8;
-      font-size: 24px;
-      line-height: 1;
-      border: none;
-      background: transparent;
-      padding: 0;
-    }
-    .x-bot-sidebar-close:hover { color: #f8fafc; }
-
-    .x-bot-sidebar-tabs {
-      display: flex;
-      gap: 16px;
-    }
-    .x-bot-sidebar-tab {
-      padding: 8px 0;
-      font-size: 14px;
-      font-weight: 600;
-      color: #64748b;
-      cursor: pointer;
-      position: relative;
-    }
-    .x-bot-sidebar-tab:hover { color: #334155; }
-    .x-bot-sidebar-tab.active { color: #1d9bf0; }
-    .x-bot-sidebar-tab.active::after {
-      content: '';
-      position: absolute;
-      bottom: -1px;
-      left: 0;
-      width: 100%;
-      height: 2px;
-      background: #1d9bf0;
-      border-radius: 2px 2px 0 0;
-    }
-
-    /* Content Area */
-    .x-bot-sidebar-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-    }
-    .x-bot-tab-view {
-      display: none;
-      flex-direction: column;
-      gap: 20px;
-    }
-    .x-bot-tab-view.active {
-      display: flex;
-    }
-
-    /* Common Components inside Sidebar */
-    .x-bot-sidebar-subtitle {
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      color: #64748b;
-      margin-bottom: 8px;
-      letter-spacing: 0.05em;
-    }
-    
-    /* Rewrite Tab Specific */
-    .x-bot-orig-author {
-      font-weight: 700;
-      color: #1d9bf0;
-      margin-bottom: 6px;
-      font-size: 14px;
-    }
-    .x-bot-orig-text {
-      font-size: 13px;
-      line-height: 1.5;
-      color: #334155;
-      background: #f8fafc;
-      padding: 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(0, 0, 0, 0.06);
-      white-space: pre-wrap;
-      max-height: 150px;
-      overflow-y: auto;
-    }
-
-    .x-bot-modal-group {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .x-bot-modal-group label {
-      font-size: 13px;
-      font-weight: 600;
-      color: #1e293b;
-    }
-
-    .x-bot-chips-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .x-bot-chip {
-      padding: 5px 10px;
-      border-radius: 99px;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      background: #ffffff;
-      font-size: 12px;
-      cursor: pointer;
-      color: #475569;
-      transition: all 0.2s ease;
-    }
-    .x-bot-chip:hover {
-      border-color: #1d9bf0;
-      background: rgba(29, 155, 240, 0.05);
-      color: #1d9bf0;
-    }
-    .x-bot-chip.active {
-      background: #1d9bf0;
-      color: #ffffff;
-      border-color: #1d9bf0;
-      box-shadow: 0 4px 10px rgba(29, 155, 240, 0.3);
-    }
-
-    .x-bot-modal-textarea {
-      width: 100%;
-      padding: 10px;
-      border-radius: 8px;
-      border: 1px solid rgba(0, 0, 0, 0.15);
-      background: #ffffff;
-      color: #0f172a;
-      font-family: inherit;
-      font-size: 13px;
-      resize: vertical;
-      outline: none;
-      transition: border-color 0.2s ease;
-      box-sizing: border-box;
-    }
-    .x-bot-modal-textarea:focus {
-      border-color: #1d9bf0;
-      box-shadow: 0 0 0 3px rgba(29, 155, 240, 0.15);
-    }
-
-    .x-bot-btn-glowing {
-      width: 100%;
-      padding: 12px;
-      border-radius: 10px;
-      border: none;
-      background: linear-gradient(135deg, #1d9bf0 0%, #0052ff 100%);
-      color: #fff;
-      font-weight: 700;
-      font-size: 14px;
-      cursor: pointer;
-      box-shadow: 0 4px 15px rgba(29, 155, 240, 0.4);
-      transition: all 0.2s ease;
-    }
-    .x-bot-btn-glowing:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 20px rgba(29, 155, 240, 0.6);
-    }
-
-    /* Typing 3D Animation Arena */
-    .x-bot-modal-animation-zone {
-      position: relative;
-      margin: 8px 0;
-      padding: 12px;
-      background: rgba(29, 155, 240, 0.03);
-      border-radius: 12px;
-      border: 1px dashed rgba(29, 155, 240, 0.3);
-      text-align: center;
-      display: none;
-    }
-    .x-bot-modal-animation-zone.active {
-      display: block;
-    }
-
-    .x-bot-grid-keyboard {
-      display: grid;
-      grid-template-columns: repeat(10, 1fr);
-      gap: 4px;
-      width: 100%;
-      margin: 8px auto;
-      padding: 6px;
-      background: #f1f5f9;
-      border-radius: 8px;
-      border: 1px solid rgba(29, 155, 240, 0.25);
-    }
-    .x-bot-grid-key {
-      height: 10px;
-      border-radius: 2px;
-      background: #e2e8f0;
-      border: 1px solid rgba(0, 0, 0, 0.05);
-    }
-    .x-bot-grid-keyboard.generating .x-bot-grid-key {
-      animation: key-typing 0.4s infinite ease-in-out alternate;
-    }
-    @keyframes key-typing {
-      0% { background: #e2e8f0; border-color: rgba(0,0,0,0.05); box-shadow: none; }
-      100% { background: rgba(29, 155, 240, 0.8); border-color: #1d9bf0; box-shadow: 0 0 8px rgba(29, 155, 240, 0.5); }
-    }
-
-    .x-bot-scanline {
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 2px;
-      background: linear-gradient(90deg, transparent 0%, #00ffff 50%, transparent 100%);
-      box-shadow: 0 0 10px #00ffff;
-      animation: holo-scanning 2s infinite ease-in-out;
-      opacity: 0.7;
-    }
-    @keyframes holo-scanning {
-      0% { top: 0%; }
-      50% { top: 100%; }
-      100% { top: 0%; }
-    }
-
-    .x-bot-anim-label {
-      font-size: 11px;
-      color: #1d9bf0;
-      font-weight: 600;
-      margin-top: 8px;
-    }
-
-    .x-bot-btn-primary {
-      padding: 10px 16px;
-      border-radius: 8px;
-      border: none;
-      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
-      transition: all 0.2s ease;
-      width: 100%;
-      box-sizing: border-box;
-      margin-top: 8px;
-    }
-    .x-bot-btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
-    }
-
-    /* Library Cards */
-    .x-bot-lib-card {
-      background: #ffffff;
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: 12px;
-      padding: 12px;
-      margin-bottom: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-    }
-    .x-bot-lib-header {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 8px;
-    }
-    .x-bot-lib-author { font-weight: 700; color: #1d9bf0; font-size: 13px; }
-    .x-bot-lib-time { color: #94a3b8; font-size: 11px; }
-    .x-bot-lib-text { font-size: 13px; color: #334155; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-    .x-bot-lib-actions { display: flex; gap: 8px; }
-    .x-bot-btn-small {
-      padding: 6px 12px;
-      border-radius: 6px;
-      border: none;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      background: #f1f5f9;
-      color: #475569;
-    }
-    .x-bot-btn-small.rewrite { background: #eff6ff; color: #1d9bf0; border: 1px solid #bfdbfe; }
-    .x-bot-btn-small.rewrite:hover { background: #dbeafe; }
-    .x-bot-btn-small.delete { background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; }
-    .x-bot-btn-small.delete:hover { background: #fee2e2; }
-    .x-bot-btn-small.post { background: #ecfdf5; color: #10b981; border: 1px solid #a7f3d0; }
-    .x-bot-btn-small.post:hover { background: #d1fae5; }
-
-    /* Empty State */
-    .x-bot-empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: #64748b;
-    }
-    .x-bot-empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
-
-
-    /* Dashboard specific styles */
-    .x-bot-dash-card {
-      background: #ffffff;
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-    }
-    .x-bot-dash-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .x-bot-dash-title { font-size: 14px; font-weight: 700; color: #0f172a; }
-    .x-bot-dash-subtitle { font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 10px; }
-    .x-bot-dash-status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
-    .x-bot-dash-status-dot.active { background: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2); }
-    .x-bot-dash-status-dot.idle { background: #94a3b8; }
-    .x-bot-dash-status-dot.error { background: #ef4444; }
-    .x-bot-btn-main {
-      width: 100%;
-      padding: 14px;
-      border-radius: 10px;
-      font-size: 15px;
-      font-weight: 700;
-      color: #fff;
-      border: none;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      background: linear-gradient(135deg, #1d9bf0 0%, #0052ff 100%);
-      box-shadow: 0 4px 15px rgba(29, 155, 240, 0.3);
-    }
-    .x-bot-btn-main.stop {
-      background: #f1f5f9;
-      color: #ef4444;
-      box-shadow: none;
-      border: 1px solid #e2e8f0;
-    }
-    .x-bot-btn-main:hover { transform: translateY(-1px); }
-    
-    .x-bot-dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .x-bot-dash-stat {
-      background: #f8fafc;
-      padding: 12px;
-      border-radius: 8px;
-      border: 1px solid #f1f5f9;
-    }
-    .x-bot-dash-stat-label { font-size: 11px; color: #64748b; font-weight: 600; margin-bottom: 4px; }
-    .x-bot-dash-stat-val { font-size: 14px; font-weight: 700; color: #0f172a; }
-    
-    .x-bot-dash-milestone { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; color: #475569; font-weight: 500; }
-    .x-bot-dash-milestone.done { color: #10b981; font-weight: 600; }
-    .x-bot-dash-milestone.done::before { content: '●'; color: #10b981; font-size: 12px; }
-    .x-bot-dash-milestone::before { content: '●'; color: #cbd5e1; font-size: 12px; }
-    
-    .x-bot-dash-signal { display: flex; flex-direction: column; gap: 10px; }
-    .x-bot-dash-signal-row { display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; }
-    .x-bot-dash-signal-label { font-size: 12px; color: #64748b; font-weight: 600; width: 60px; }
-    .x-bot-dash-signal-val { font-size: 12px; font-weight: 700; color: #0f172a; flex: 1; text-align: right; }
-    
-    .x-bot-dash-log { background: #f8fafc; border-radius: 8px; padding: 10px; max-height: 120px; overflow-y: auto; font-size: 11px; font-family: monospace; color: #475569; }
-    .x-bot-dash-log-line { border-bottom: 1px solid #f1f5f9; padding: 4px 0; }
-    /* Switch */
-    .x-bot-switch-container {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #f8fafc;
-      padding: 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(0,0,0,0.08);
-      margin-bottom: 16px;
-    }
-    .x-bot-switch-label { font-size: 13px; font-weight: 600; color: #0f172a; }
-    .x-bot-switch-desc { font-size: 11px; color: #94a3b8; margin-top: 2px; }
-    .x-bot-switch { position: relative; display: inline-block; width: 40px; height: 22px; }
-    .x-bot-switch input { opacity: 0; width: 0; height: 0; }
-    .x-bot-slider {
-      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #334155; transition: .3s; border-radius: 22px;
-    }
-    .x-bot-slider:before {
-      position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px;
-      background-color: white; transition: .3s; border-radius: 50%;
-    }
-    input:checked + .x-bot-slider { background-color: #10b981; }
-    input:checked + .x-bot-slider:before { transform: translateX(18px); }
-
-
-    /* Chat Tab */
-    .x-bot-chat-msg-row { display: flex; flex-direction: column; margin-bottom: 16px; }
-    .x-bot-chat-msg-row.user { align-items: flex-end; }
-    .x-bot-chat-msg-row.assistant { align-items: flex-start; }
-    .x-bot-chat-msg-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600; }
-    .x-bot-chat-msg-bubble {
-      padding: 10px 14px;
-      border-radius: 14px;
-      font-size: 13px;
-      line-height: 1.5;
-      max-width: 90%;
-      word-wrap: break-word;
-    }
-    .x-bot-chat-msg-row.user .x-bot-chat-msg-bubble {
-      background: #1d9bf0;
-      color: #fff;
-      border-bottom-right-radius: 4px;
-    }
-    .x-bot-chat-msg-row.assistant .x-bot-chat-msg-bubble {
-      background: #f1f5f9;
-      color: #1e293b;
-      border-bottom-left-radius: 4px;
-    }
-    .x-bot-chat-typing-dot {
-      display: inline-block; width: 6px; height: 6px; margin: 0 2px;
-      background-color: #94a3b8; border-radius: 50%;
-      animation: x-chat-typing 1.4s infinite ease-in-out both;
-    }
-    .x-bot-chat-typing-dot:nth-child(1) { animation-delay: -0.32s; }
-    .x-bot-chat-typing-dot:nth-child(2) { animation-delay: -0.16s; }
-    @keyframes x-chat-typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-
-    .x-bot-sidebar-content::-webkit-scrollbar { width: 6px; }
-
-    /* Chat Tab */
-    .x-bot-chat-msg-row { display: flex; flex-direction: column; margin-bottom: 16px; }
-    .x-bot-chat-msg-row.user { align-items: flex-end; }
-    .x-bot-chat-msg-row.assistant { align-items: flex-start; }
-    .x-bot-chat-msg-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600; }
-    .x-bot-chat-msg-bubble {
-      padding: 10px 14px;
-      border-radius: 14px;
-      font-size: 13px;
-      line-height: 1.5;
-      max-width: 90%;
-      word-wrap: break-word;
-    }
-    .x-bot-chat-msg-row.user .x-bot-chat-msg-bubble {
-      background: #1d9bf0;
-      color: #fff;
-      border-bottom-right-radius: 4px;
-    }
-    .x-bot-chat-msg-row.assistant .x-bot-chat-msg-bubble {
-      background: #f1f5f9;
-      color: #1e293b;
-      border-bottom-left-radius: 4px;
-    }
-    .x-bot-chat-typing-dot {
-      display: inline-block; width: 6px; height: 6px; margin: 0 2px;
-      background-color: #94a3b8; border-radius: 50%;
-      animation: x-chat-typing 1.4s infinite ease-in-out both;
-    }
-    .x-bot-chat-typing-dot:nth-child(1) { animation-delay: -0.32s; }
-    .x-bot-chat-typing-dot:nth-child(2) { animation-delay: -0.16s; }
-    @keyframes x-chat-typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-
-    .x-bot-sidebar-content::-webkit-scrollbar-track { background: transparent; }
-
-    /* Chat Tab */
-    .x-bot-chat-msg-row { display: flex; flex-direction: column; margin-bottom: 16px; }
-    .x-bot-chat-msg-row.user { align-items: flex-end; }
-    .x-bot-chat-msg-row.assistant { align-items: flex-start; }
-    .x-bot-chat-msg-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600; }
-    .x-bot-chat-msg-bubble {
-      padding: 10px 14px;
-      border-radius: 14px;
-      font-size: 13px;
-      line-height: 1.5;
-      max-width: 90%;
-      word-wrap: break-word;
-    }
-    .x-bot-chat-msg-row.user .x-bot-chat-msg-bubble {
-      background: #1d9bf0;
-      color: #fff;
-      border-bottom-right-radius: 4px;
-    }
-    .x-bot-chat-msg-row.assistant .x-bot-chat-msg-bubble {
-      background: #f1f5f9;
-      color: #1e293b;
-      border-bottom-left-radius: 4px;
-    }
-    .x-bot-chat-typing-dot {
-      display: inline-block; width: 6px; height: 6px; margin: 0 2px;
-      background-color: #94a3b8; border-radius: 50%;
-      animation: x-chat-typing 1.4s infinite ease-in-out both;
-    }
-    .x-bot-chat-typing-dot:nth-child(1) { animation-delay: -0.32s; }
-    .x-bot-chat-typing-dot:nth-child(2) { animation-delay: -0.16s; }
-    @keyframes x-chat-typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-
-    .x-bot-sidebar-content::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }
   `;
   (document.head || document.documentElement).appendChild(style);
 }
 // Simple localization for content script
 function tUI(msg) {
-  const lang = botState.engineLanguage || 'zh';
+  const lang = normalizeUiLanguage(botState.engineLanguage || 'auto');
   
   const errorCodes = {
     'ERR_MISSING_API_KEY': {
       zh: '请先在系统设置面板中配置并保存您真实的 API Key！',
-      en: 'Please configure and save your real API Key in Settings first!'
+      en: 'Please configure and save your real API Key in Settings first!',
+      ja: '先に設定画面で本物の API Key を設定して保存してください。',
+      es: 'Configura y guarda tu API Key real en Ajustes primero.',
+      id: 'Konfigurasikan dan simpan API Key asli di Pengaturan terlebih dahulu.'
     },
     'ERR_MOCK_KEY_NOT_ALLOWED': {
       zh: '请配置真实的 API Key，当前为本地预览占位符',
-      en: 'Please configure a real API Key, current is a mock placeholder'
+      en: 'Please configure a real API Key, current is a mock placeholder',
+      ja: '本物の API Key を設定してください。現在はローカルプレビュー用です。',
+      es: 'Configura una API Key real; la actual es un marcador local.',
+      id: 'Konfigurasikan API Key asli; saat ini masih placeholder lokal.'
     }
   };
 
   let res = msg;
   for (const [code, trans] of Object.entries(errorCodes)) {
     if (res.includes(code)) {
-      res = res.replace(code, trans[lang] || trans['zh']);
+      res = res.replace(code, trans[lang] || trans.en || trans.zh);
     }
   }
 
   if (lang === 'zh') return res;
   
   const dict = {
-    '❌ 无法提取推文文字内容': '❌ Failed to extract tweet text',
-    '❌ 生成失败: ': '❌ Generation failed: ',
-    '❌ 收录失败：扩展后台未就绪': '❌ Save failed: extension backend not ready',
-    'ℹ️ 该推文已被收录': 'ℹ️ Tweet already saved',
-    '📥 成功收录至VibeX灵感库！': '📥 Successfully saved to Vault!',
-    '❌ 收录失败: ': '❌ Save failed: ',
-    '✅ 内容已填入': '✅ Content filled',
-    '❌ 未找到输入框，请手动粘贴': '❌ Input box not found, please paste manually',
-    '✅ 回复已自动填入！': '✅ Reply auto-filled!',
-    '❌ 未找到该推文的回复按钮': '❌ Reply button not found',
-    '❌ 页面已刷新或推文不在视野内': '❌ Page refreshed or tweet out of view',
-    '未知错误': 'Unknown error',
-    '仿写': 'Rewrite',
-    '回复': 'Reply',
-    '一键仿写': 'One-click Rewrite',
-    '智能回复': 'Smart Reply',
-    'VibeX正在思考...': 'VibeX is thinking...',
-    'AI 正在思考...': 'AI is thinking...',
-    '请先在系统设置面板中配置并保存 API Key！': 'Please configure and save your API Key in Settings first!'
+    '❌ 无法提取推文文字内容': { en: '❌ Failed to extract tweet text', ja: '❌ ツイート本文を取得できません', es: '❌ No se pudo extraer el texto', id: '❌ Gagal mengambil teks tweet' },
+    '❌ 生成失败: ': { en: '❌ Generation failed: ', ja: '❌ 生成に失敗: ', es: '❌ Error al generar: ', id: '❌ Gagal membuat: ' },
+    '❌ 收录失败：扩展后台未就绪': { en: '❌ Save failed: extension backend not ready', ja: '❌ 保存失敗: 拡張のバックグラウンドが未準備です', es: '❌ Error al guardar: backend no listo', id: '❌ Gagal menyimpan: backend belum siap' },
+    'ℹ️ 该推文已被收录': { en: 'ℹ️ Tweet already saved', ja: 'ℹ️ このツイートは保存済みです', es: 'ℹ️ Tweet ya guardado', id: 'ℹ️ Tweet sudah disimpan' },
+    '📥 成功收录至VibeX灵感库！': { en: '📥 Saved to VibeX Vault!', ja: '📥 VibeX Vault に保存しました', es: '📥 Guardado en VibeX Vault', id: '📥 Tersimpan ke VibeX Vault' },
+    '❌ 收录失败: ': { en: '❌ Save failed: ', ja: '❌ 保存失敗: ', es: '❌ Error al guardar: ', id: '❌ Gagal menyimpan: ' },
+    '✅ 内容已填入': { en: '✅ Content filled', ja: '✅ 内容を入力しました', es: '✅ Contenido insertado', id: '✅ Konten terisi' },
+    '❌ 未找到输入框，请手动粘贴': { en: '❌ Input box not found, please paste manually', ja: '❌ 入力欄が見つかりません。手動で貼り付けてください', es: '❌ No se encontró el campo; pega manualmente', id: '❌ Kotak input tidak ditemukan, tempel manual' },
+    '✅ 回复已自动填入！': { en: '✅ Reply auto-filled!', ja: '✅ 返信を自動入力しました', es: '✅ Respuesta insertada', id: '✅ Balasan otomatis terisi' },
+    '❌ 未找到该推文的回复按钮': { en: '❌ Reply button not found', ja: '❌ 返信ボタンが見つかりません', es: '❌ No se encontró el botón de respuesta', id: '❌ Tombol balas tidak ditemukan' },
+    '❌ 页面已刷新或推文不在视野内': { en: '❌ Page refreshed or tweet out of view', ja: '❌ ページ更新またはツイートが表示外です', es: '❌ Página actualizada o tweet fuera de vista', id: '❌ Halaman dimuat ulang atau tweet tidak terlihat' },
+    '未知错误': { en: 'Unknown error', ja: '不明なエラー', es: 'Error desconocido', id: 'Kesalahan tidak diketahui' },
+    '仿写': { en: 'Rewrite', ja: '書き換え', es: 'Reescribir', id: 'Tulis ulang' },
+    '回复': { en: 'Reply', ja: '返信', es: 'Responder', id: 'Balas' },
+    '一键仿写': { en: 'One-click Rewrite', ja: 'ワンクリック書き換え', es: 'Reescritura rápida', id: 'Tulis ulang sekali klik' },
+    '智能回复': { en: 'Smart Reply', ja: 'スマート返信', es: 'Respuesta inteligente', id: 'Balasan pintar' },
+    'AI 正在思考...': { en: 'AI is thinking...', ja: 'AI が考えています...', es: 'La IA está pensando...', id: 'AI sedang berpikir...' },
+    '请先在系统设置面板中配置并保存 API Key！': { en: 'Please configure and save your API Key in Settings first!', ja: '先に設定で API Key を保存してください。', es: 'Configura y guarda tu API Key en Ajustes primero.', id: 'Konfigurasikan dan simpan API Key di Pengaturan terlebih dahulu.' }
   };
 
-  for (const [zh, en] of Object.entries(dict)) {
+  for (const [zh, translations] of Object.entries(dict)) {
     if (res.includes(zh)) {
-      res = res.replace(zh, en);
+      res = res.replace(zh, translations[lang] || translations.en || zh);
     }
   }
   return res;
@@ -2618,10 +1681,10 @@ function injectCollectButtons() {
       const tweetData = getTweetData();
       if (!tweetData) return;
 
-      chrome.runtime.sendMessage({
+      safeRuntimeSendMessage({
         action: 'autoRewrite',
         tweetData: tweetData
-      }).catch(()=>{});
+      });
     });
 
     const replyBtn = wrapper.querySelector('.reply-btn');
@@ -2677,7 +1740,7 @@ function injectCollectButtons() {
       }, 100);
       setTimeout(() => clearInterval(showLoader), 2000);
 
-      chrome.runtime.sendMessage({
+      safeRuntimeSendMessage({
         action: 'magicPrompt',
         promptType: 'draft_reply',
         contextData: tweetData
@@ -2744,7 +1807,7 @@ function handleCollectClick(article) {
   
   const tweet = { id, author, text, url, time };
   
-  chrome.runtime.sendMessage({ action: 'collectTweet', tweet }, (response) => {
+  safeRuntimeSendMessage({ action: 'collectTweet', tweet }, (response) => {
     if (chrome.runtime.lastError) {
       showToast('❌ 收录失败：扩展后台未就绪', 'error');
       return;
@@ -2785,11 +1848,11 @@ function syncContext() {
     if (lastContextId !== 'profile_' + author) {
       lastContextId = 'profile_' + author;
       const bioEl = document.querySelector('[data-testid="UserDescription"]');
-      chrome.runtime.sendMessage({
+      safeRuntimeSendMessage({
         action: 'updateContext',
         contextType: 'profile',
         data: { author: author, bio: bioEl ? bioEl.textContent : '' }
-      }).catch(e => {}); // ignore disconnect errors
+      });
     }
     return;
   }
@@ -2799,11 +1862,11 @@ function syncContext() {
   if (tweet) {
     if (lastContextId !== 'tweet_' + tweet.id) {
       lastContextId = 'tweet_' + tweet.id;
-      chrome.runtime.sendMessage({
+      safeRuntimeSendMessage({
         action: 'updateContext',
         contextType: 'tweet',
         data: tweet
-      }).catch(e => {});
+      });
     }
   }
 }
@@ -2818,112 +1881,12 @@ window.addEventListener('scroll', () => {
 // Run once on load
 setTimeout(syncContext, 2000);
 
-// ==========================================
-// MAGIC INJECTION (The Xiaolongxia Standard)
-// ==========================================
-chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
-  if (req.action === 'openComposeModal') {
-    const postBtn = document.querySelector('a[data-testid="SideNav_NewTweet_Button"]');
-    if (postBtn) {
-      postBtn.click();
-      setTimeout(() => {
-        let editor = null;
-          const dialog = document.querySelector('[role="dialog"]');
-          if (dialog) {
-            editor = dialog.querySelector('[contenteditable="true"]');
-          } else {
-            editor = document.querySelector('[data-testid="tweetTextarea_0"] [contenteditable="true"]');
-            if (!editor) {
-              const editors = document.querySelectorAll('[contenteditable="true"]');
-              if (editors.length > 0) editor = editors[editors.length - 1];
-            }
-          }
-        if (editor) {
-          editor.focus();
-          document.execCommand('insertText', false, req.text);
-          showToast('✅ 内容已填入', 'system');
-        } else {
-          showToast('❌ 未找到输入框，请手动粘贴', 'error');
-        }
-      }, 800);
-    } else {
-      window.open(`https://x.com/compose/tweet?text=${encodeURIComponent(req.text)}`, '_top');
-    }
-    return;
-  }
-
-  if (req.action === 'injectReply') {
-    if (!req.tweetId) return;
-    
-    // Find the specific tweet we saved context for
-    const article = document.querySelector(`article[data-confi-id="${req.tweetId}"]`);
-    if (article) {
-      // Find the native reply button inside this article
-      const replyBtn = article.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
-      if (replyBtn) {
-        replyBtn.click();
-        
-        // Wait for the modal editor to appear
-        setTimeout(() => {
-          // Twitter's reply modal editor
-          let editor = null;
-          const dialog = document.querySelector('[role="dialog"]');
-          if (dialog) {
-            editor = dialog.querySelector('[contenteditable="true"]');
-          } else {
-            editor = document.querySelector('[data-testid="tweetTextarea_0"] [contenteditable="true"]');
-            if (!editor) {
-              const editors = document.querySelectorAll('[contenteditable="true"]');
-              if (editors.length > 0) editor = editors[editors.length - 1];
-            }
-          }
-          if (editor) {
-            editor.focus();
-            
-            // Due to React, setting innerText won't trigger state.
-            // Using DataTransfer and paste event is the most robust way.
-            const dataTransfer = new DataTransfer();
-            dataTransfer.setData('text/plain', req.text);
-            const pasteEvent = new ClipboardEvent('paste', {
-              clipboardData: dataTransfer,
-              bubbles: true,
-              cancelable: true
-            });
-            editor.dispatchEvent(pasteEvent);
-            
-            showToast('✅ 回复已自动填入！', 'success');
-          } else {
-            showToast('❌ 未找到输入框，请手动粘贴', 'error');
-          }
-        }, 800);
-      } else {
-        showToast('❌ 未找到该推文的回复按钮', 'error');
-      }
-    } else {
-      showToast('❌ 页面已刷新或推文不在视野内', 'error');
-    }
-  }
-});
-
 chrome.runtime.onMessage.addListener((req) => {
   if (req.action === 'requestSync') {
     lastContextId = null; // force sync
     syncContext();
-  } else if (req.action === 'sidePanelState') {
-    const btn = document.getElementById('confi-x-floating-btn');
-    if (btn) {
-      btn.style.display = req.isOpen ? 'none' : 'block';
-    }
   }
 });
-
-function injectFloatingButton() {
-  // Removed per user request: floating window disabled
-  const existingBtn = document.getElementById('confi-x-floating-btn');
-  if (existingBtn) existingBtn.remove();
-}
-// Run once
-// setTimeout(injectFloatingButton, 1000);
 
 // ==========================================
 // CENTRAL PERFORMANCE OPTIMIZED LOOP
@@ -2935,26 +1898,12 @@ let lastStorageSyncTime = 0;
 let lastUIInjectTime = 0;
 
 const domObserver = new MutationObserver((mutations) => {
-  // Check if mutations only originate from our own widget to prevent infinite loops
-  let isOnlySelf = true;
-  for (const m of mutations) {
-    const isSelfId = m.target.id && m.target.id.startsWith && m.target.id.startsWith('x-auto-bot');
-    const isInsideWidget = m.target.closest && m.target.closest('#x-auto-bot-widget');
-    if (!isSelfId && !isInsideWidget) {
-      isOnlySelf = false;
-      break;
-    }
-  }
-  if (isOnlySelf) return;
-
   if (domUpdateTimer) clearTimeout(domUpdateTimer);
   domUpdateTimer = setTimeout(() => {
     const now = Date.now();
     
     // UI injections (high priority, bound to DOM renders but throttled to avoid lag)
     if (now - lastUIInjectTime > 400) {
-      ensureWidget();
-      renderWidget();
       injectCollectButtons();
       lastUIInjectTime = now;
     }
@@ -2971,10 +1920,6 @@ const domObserver = new MutationObserver((mutations) => {
       lastStorageSyncTime = now;
     }
     
-    if (botState.isRunning && botState.petEnabled !== false) {
-      checkNewSuggestions();
-      checkIdleChat();
-    }
   }, 100);
 });
 
@@ -2992,8 +1937,7 @@ setInterval(() => {
   
   // UI injections fallback
   if (now - lastUIInjectTime > 2000) {
-    ensureWidget();
-    renderWidget();
+    injectCollectButtons();
     lastUIInjectTime = now;
   }
   
@@ -3066,7 +2010,7 @@ const composeObserver = new MutationObserver((mutations) => {
 
             // Since we might not have the original tweetData locally in scope,
             // we ask background to just re-run the last magicPrompt.
-            chrome.runtime.sendMessage({
+            safeRuntimeSendMessage({
               action: 'magicPrompt',
               promptType: 'draft_reply',
               contextData: window.lastReplyTweetData,
@@ -3153,16 +2097,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // RE-INJECTED MISSING FUNCTIONS
 function maybeNavigateToHomeSurface(state = {}, reason = '当前页面不是发现流') {
-  if (isDiscoverySurfacePage()) return false;
+  if (isDiscoverySurfacePage(state)) return false;
   const isDiscoveryNavigationUnsafe = (state) => { return false; }; // placeholder or use actual
-  if (document.querySelector('[data-testid="tweetTextarea_0"]')) {
+  if (hasActiveReplyFlow(state)) {
+    addLog('info', '正在处理上一条自动回复，暂不切回推荐页');
+    return false;
+  }
+  if (hasActivePostFlow(state)) {
+    addLog('info', '正在处理待发推文，暂不切回推荐页');
+    return false;
+  }
+  if (hasVisibleUnfinishedTweetEditor()) {
     addLog('info', '检测到未完成编辑器，暂不离开当前页面');
     return false;
   }
 
   const now = Date.now();
   const lastSurfaceNavigationAt = Number(state.lastSurfaceNavigationAt) || 0;
-  if (lastSurfaceNavigationAt && now - lastSurfaceNavigationAt < 300000) return false;
+  const shouldBypassSurfaceThrottle = getAutomationMode(state) === 'autoReply' && isSearchPage();
+  if (!shouldBypassSurfaceThrottle && lastSurfaceNavigationAt && now - lastSurfaceNavigationAt < 300000) return false;
 
   chrome.storage.local.set({
     lastSurfaceNavigationAt: now,
@@ -3179,8 +2132,88 @@ function isSearchPage() {
   return window.location.pathname === '/search';
 }
 
+function getCurrentSearchQuery() {
+  try {
+    return new URLSearchParams(window.location.search).get('q') || '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function isRelaxedDiscoveryQuery(query = '') {
+  return /\bmin_faves:(?:[0-9]|10)\b/i.test(String(query || ''));
+}
+
+function relaxDiscoveryQuery(query = '') {
+  const relaxedSince = typeof getRecentSinceDate === 'function'
+    ? getRecentSinceDate(14)
+    : '';
+  let nextQuery = String(query || '').trim();
+  if (!nextQuery) return '';
+  nextQuery = /\bmin_faves:\d+\b/i.test(nextQuery)
+    ? nextQuery.replace(/\bmin_faves:\d+\b/i, 'min_faves:10')
+    : `${nextQuery} min_faves:10`;
+  if (relaxedSince) {
+    nextQuery = /\bsince:\d{4}-\d{2}-\d{2}\b/i.test(nextQuery)
+      ? nextQuery.replace(/\bsince:\d{4}-\d{2}-\d{2}\b/i, `since:${relaxedSince}`)
+      : `${nextQuery} since:${relaxedSince}`;
+  }
+  return nextQuery.replace(/\s+/g, ' ').trim();
+}
+
+function getSearchPageAgeMs(state = {}) {
+  const navStart = performance?.timeOrigin || 0;
+  const sinceNavigation = navStart ? Date.now() - navStart : 0;
+  const botNavigationAge = state.botNavigationTime ? Date.now() - Number(state.botNavigationTime) : 0;
+  return Math.max(sinceNavigation || 0, botNavigationAge || 0);
+}
+
+function isDeadEndSearchPage() {
+  if (!isSearchPage()) return false;
+  const text = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+  if (!text) return false;
+  const hasTweets = document.querySelectorAll('article[data-testid="tweet"]').length > 0;
+  const emptySignals = [
+    /没有找到.*结果/,
+    /没有.*结果/,
+    /无结果/,
+    /尝试搜索其他内容/,
+    /检查你的搜索设置/,
+    /No results/i,
+    /Search for something else/i,
+    /Try searching for something else/i,
+    /Check your Search settings/i
+  ];
+  return emptySignals.some(pattern => pattern.test(text)) && (!hasTweets || /尝试搜索其他内容|No results/i.test(text));
+}
+
+function maybeEscapeDeadEndSearch(state = {}) {
+  if (!shouldUseKeywordDiscovery(getAutomationMode(state))) return false;
+  if (!isDeadEndSearchPage()) return false;
+  if (getSearchPageAgeMs(state) < SEARCH_EMPTY_ROTATE_MIN_AGE_MS) return false;
+  return maybeNavigateToDiscoverySearch(state, '搜索页无结果，切换下一个关键词', {
+    force: true,
+    deadEnd: true,
+    retryCurrentRelaxed: true
+  });
+}
+
 function maybeNavigateToDiscoverySearch(state = {}, reason = '当前页面没有匹配候选', options = {}) {
-  if (document.querySelector('[data-testid="tweetTextarea_0"]')) {
+  if (!shouldUseKeywordDiscovery(getAutomationMode(state))) {
+    return false;
+  }
+  if (!options.deadEnd && !isSearchPage() && isAutomationJustStarted(state)) {
+    return false;
+  }
+  if (hasActiveReplyFlow(state)) {
+    addLog('info', '正在处理上一条自动回复，暂不切换关键词搜索页');
+    return false;
+  }
+  if (hasActivePostFlow(state)) {
+    addLog('info', '正在处理待发推文，暂不切换关键词搜索页');
+    return false;
+  }
+  if (hasVisibleUnfinishedTweetEditor()) {
     addLog('info', '检测到未完成编辑器，暂不切换关键词搜索页');
     return false;
   }
@@ -3188,22 +2221,28 @@ function maybeNavigateToDiscoverySearch(state = {}, reason = '当前页面没有
   if (queries.length === 0) return false;
   const now = Date.now();
   const lastSearchAt = Number(state.lastDiscoverySearchAt) || 0;
-  let minInterval = 60000;
-  if (options.force) {
-    minInterval = 10000;
+  let minInterval = SEARCH_DISCOVERY_MIN_INTERVAL_MS;
+  if (options.deadEnd) {
+    minInterval = SEARCH_DISCOVERY_DEAD_END_ROTATE_MS;
+  } else if (options.force) {
+    minInterval = SEARCH_DISCOVERY_LOW_QUALITY_ROTATE_MS;
   } else if (isSearchPage()) {
-    minInterval = 180000;
+    minInterval = SEARCH_DISCOVERY_ROTATE_INTERVAL_MS;
   } else if (window.location.pathname === '/home') {
     minInterval = 15000;
   }
   if (lastSearchAt && now - lastSearchAt < minInterval) return false;
-  const currentQuery = new URLSearchParams(window.location.search).get('q') || '';
+  const currentQuery = getCurrentSearchQuery();
   let nextIndex = Number(state.discoverySearchIndex) || 0;
+  let query = '';
+  if (options.retryCurrentRelaxed && currentQuery && !isRelaxedDiscoveryQuery(currentQuery)) {
+    query = relaxDiscoveryQuery(currentQuery);
+  }
   if (isSearchPage() && currentQuery) {
     const currentIndex = queries.findIndex(q => q === currentQuery);
     if (currentIndex >= 0) nextIndex = currentIndex + 1;
   }
-  const query = queries[nextIndex % queries.length];
+  if (!query) query = queries[nextIndex % queries.length];
   const url = 'https://x.com/search?q=' + encodeURIComponent(query) + '&src=typed_query&f=top';
   chrome.storage.local.set({
     lastDiscoverySearchAt: now,

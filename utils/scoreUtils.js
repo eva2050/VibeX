@@ -67,9 +67,11 @@ export { scoreNumber, scoreObject, totalViralScore, bestViralCandidate, normaliz
 
 function getGeneratedTweetRejectionReason(text = '') {
   const normalized = compactWhitespace(text);
+  const lower = normalized.toLowerCase();
   if (!normalized) return '推文为空';
   if (visualLength(normalized) < 24) return '推文过短，缺少可传播信息';
   if (visualLength(normalized) > 620) return '推文过长，容易变成公众号段落';
+  if (isTemplateLikePost(normalized, lower)) return '推文句式过于模板化，像 AI 批量内容';
   if (FORBIDDEN_CLAIM_PATTERNS.some(pattern => pattern.test(normalized))) {
     return '推文包含不允许的收益或确定性承诺';
   }
@@ -89,6 +91,8 @@ function getGeneratedReplyRejectionReason(reply = '', tweet = '') {
   const normalized = String(reply || '').toLowerCase().replace(/\s+/g, ' ').trim();
   if (!normalized) return 'AI 回复为空';
   if (visualLength(reply) > 110) return 'AI 回复过长';
+  if (isTemplateLikeReply(reply, normalized)) return 'AI 回复句式过于模板化';
+  if (hasUnsupportedHardData(reply, tweet)) return 'AI 回复疑似编造数据或机构事实';
   if (countPatternMatches(reply, /#/g) > 1) return 'AI 回复包含过多标签';
   if (LOW_VALUE_REPLY_PATTERNS.some(pattern => pattern.test(normalized))) {
     return 'AI 回复缺少信息增量';
@@ -96,7 +100,7 @@ function getGeneratedReplyRejectionReason(reply = '', tweet = '') {
   if (FORBIDDEN_CLAIM_PATTERNS.some(pattern => pattern.test(reply))) {
     return 'AI 回复包含不允许的收益或确定性承诺';
   }
-  if (!hasConcreteSignal(reply)) {
+  if (!hasConcreteSignal(reply) && !hasLightReplySignal(reply)) {
     return 'AI 回复过于泛泛，缺少具体判断、边界或动作';
   }
 
@@ -113,4 +117,51 @@ function getGeneratedReplyRejectionReason(reply = '', tweet = '') {
     return 'AI 回复包含强引流话术，但原推没有明确求资源';
   }
   return '';
+}
+
+function hasUnsupportedHardData(reply = '', tweet = '') {
+  const replyText = String(reply || '');
+  const tweetText = String(tweet || '');
+  const hardDataPatterns = [
+    /\b20\d{2}\s*(?:年)?\s*Q[1-4]\b/i,
+    /\bQ[1-4]\s*20\d{2}\b/i,
+    /\d+(?:\.\d+)?\s*%/,
+    /\d+(?:\.\d+)?\s*(?:万|亿|k|m|b)\b/i,
+    /\b(?:Chainalysis|Gartner|McKinsey|BCG|Bain|Forrester|IDC|CB Insights|PitchBook)\b/i,
+    /数据显示|报告显示|研究显示|追踪的|according to|data shows|report shows/i
+  ];
+  const replyHasHardData = hardDataPatterns.some(pattern => pattern.test(replyText));
+  if (!replyHasHardData) return false;
+  return !hardDataPatterns.some(pattern => pattern.test(tweetText));
+}
+
+function isTemplateLikePost(text = '', lower = '') {
+  const firstLine = text.split('\n').find(Boolean) || text;
+  const firstLower = firstLine.toLowerCase();
+  return [
+    /^most\s+(founders|creators|builders|ai founders|ai builders|people)\b/,
+    /^the\s+(real test|dirty secret|missing angle|key point)\b/,
+    /^most\s+.+\s+are\s+just\s+/,
+    /most\s+people\s+think.+(but|yet)/,
+    /大多数人以为.+真正决定/,
+    /真正决定结果的是/
+  ].some(pattern => pattern.test(firstLower) || pattern.test(lower));
+}
+
+function isTemplateLikeReply(reply = '', normalized = '') {
+  const first = String(reply || '').trim().split('\n').find(Boolean) || '';
+  const firstLower = first.toLowerCase();
+  return [
+    /^(missing angle|sharpen|real experience|next step|key point)\s*[:：]/,
+    /^the\s+(real test|dirty secret)\b/,
+    /^this is where\b/
+  ].some(pattern => pattern.test(firstLower) || pattern.test(normalized));
+}
+
+function hasLightReplySignal(reply = '') {
+  const text = String(reply || '').trim();
+  const lower = text.toLowerCase();
+  const wordCount = lower.split(/\s+/).filter(Boolean).length;
+  if (/[?？]/.test(text) && (wordCount >= 5 || text.length >= 12)) return true;
+  return /\b(cost|latency|speed|workflow|retention|conversion|pricing|distribution|constraint|context|trade-?off|edge case|bottleneck|benchmark|shipping|inference|memory|compute|bandwidth|margin|validation)\b/i.test(lower);
 }

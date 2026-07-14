@@ -6,7 +6,7 @@ export function handleAutomationMessage(request, sender, sendResponse, context) 
     performTrustedClick(sender.tab?.id, request.x, request.y)
       .then(() => sendResponse({ success: true }))
       .catch((error) => {
-        addLog('warn', `真实点击失败，回退 DOM 点击: ${error.message}`);
+        addLog('warn', 'trusted_click_failed', [error.message]);
         sendResponse({ success: false, error: error.message });
       });
     return true;
@@ -17,7 +17,7 @@ export function handleAutomationMessage(request, sender, sendResponse, context) 
       return false;
     }
     chrome.tabs.create({ url, active: true }, (tab) => {
-      addLog('info', `当前 X 页面无法安全跳转，已新开干净自动化标签页 ${tab.id}`);
+      addLog('info', 'automation_tab_opened', [tab.id]);
       sendResponse({ success: true, tabId: tab.id });
     });
     return true;
@@ -34,7 +34,7 @@ export function handleAutomationMessage(request, sender, sendResponse, context) 
     context.analyzeOnboardingSource(request.sourceInput || '')
       .then((analysis) => sendResponse({ success: true, analysis }))
       .catch((error) => {
-        addLog('warn', `启动向导分析失败: ${error.message}`);
+        addLog('warn', 'onboarding_analysis_failed', [error.message]);
         sendResponse({ success: false, error: error.message });
       });
     return true;
@@ -44,6 +44,47 @@ export function handleAutomationMessage(request, sender, sendResponse, context) 
   } else if (request.action === "checkAndSetupAlarm") {
     if (context.checkAndSetupAlarm) context.checkAndSetupAlarm();
     sendResponse({ success: true });
+  } else if (request.action === "ensureAutomationXTab") {
+    context.ensureAutomationXTab?.({ active: Boolean(request.active), reason: request.reason || 'manual' });
+    sendResponse({ success: true });
+  } else if (request.action === "scanPerformanceBaseline") {
+    if (context.runInitialBaselineScan) context.runInitialBaselineScan();
+    sendResponse({ success: true });
+  } else if (request.action === "reviewPendingPostPerformance") {
+    if (!context.reviewNextPendingPost) {
+      sendResponse({ success: false, error: 'performance review unavailable' });
+      return false;
+    }
+    context.reviewNextPendingPost({ postId: request.postId || '' })
+      .then(result => sendResponse(result || { success: true }))
+      .catch(error => sendResponse({ success: false, error: error.message || String(error) }));
+    return true;
+  } else if (request.action === "connectXAccount") {
+    context.connectXAccount?.(request.clientId || '')
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  } else if (request.action === "disconnectXAccount") {
+    context.disconnectXAccount?.()
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  } else if (request.action === "syncConnectedXData") {
+    context.syncConnectedXData?.({
+      enrichProfile: Boolean(request.enrichProfile),
+      updateProfileFromSamples: Boolean(request.updateProfileFromSamples),
+      skipAutoPersonaAnalysis: Boolean(request.skipAutoPersonaAnalysis),
+      openVisible: Boolean(request.openVisible),
+      openCreatorCenter: request.openCreatorCenter !== false
+    })
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  } else if (request.action === "updateProfileFromSamples") {
+    context.updateProfileFromSamples?.()
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
   }
   return false;
 }

@@ -14,7 +14,7 @@ export function setupMessageRouter(context) {
       handled = true;
     }
     // Automation Handler
-    else if (['trustedClick', 'openAutomationTab', 'refreshXOfficialDraftCount', 'xLoginDetected', 'startAccountAutoSetup', 'analyzeOnboardingSource', 'maybeStartAgentAfterSetup', 'checkAndSetupAlarm'].includes(request.action)) {
+    else if (['trustedClick', 'openAutomationTab', 'refreshXOfficialDraftCount', 'xLoginDetected', 'startAccountAutoSetup', 'analyzeOnboardingSource', 'maybeStartAgentAfterSetup', 'checkAndSetupAlarm', 'ensureAutomationXTab', 'scanPerformanceBaseline', 'reviewPendingPostPerformance', 'connectXAccount', 'disconnectXAccount', 'syncConnectedXData', 'updateProfileFromSamples'].includes(request.action)) {
       isAsync = handleAutomationMessage(request, sender, sendResponse, context);
       handled = true;
     }
@@ -24,11 +24,13 @@ export function setupMessageRouter(context) {
       handled = true;
     }
     // UI / Misc Handler
-    else if (['extractBio', 'openProfileTab', 'collectTweet', 'deleteCollectedTweet', 'checkSidePanelState', 'openSidePanel', 'autoRewrite', 'autoReply'].includes(request.action)) {
+    else if (['extractBio', 'openProfileTab', 'collectTweet', 'deleteCollectedTweet', 'checkSidePanelState', 'openSidePanel', 'autoRewrite', 'autoReply', 'toggleBot'].includes(request.action)) {
       isAsync = handleUiMessage(request, sender, sendResponse, context);
       handled = true;
     }
 
     if (handled) return isAsync;
+    console.warn('[VibeX] Unhandled message action:', request?.action || request);
+    return false;
   });
 }

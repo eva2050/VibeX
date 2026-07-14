@@ -1,90 +1,637 @@
-# VibeX Product Requirements Document (PRD)
+# VibeX PRD - AI X Growth Copilot
 
-## 1. Product Positioning
-**VibeX** is an AI smart copilot extension tailored for X (Twitter) creators. Its core objective is to achieve fully automated traffic growth on the X platform while perfectly simulating real human behavior. It encompasses automated high-quality engagement, automated stylized posting, intelligent material collection, one-click viral rewriting, and a closed-loop self-evolution engine.
+Version: 2026-06-15
+Owner: VibeX
+Product type: Chrome Extension, Manifest V3
+Primary platform: X.com
 
-## 2. Core Feature Modules
+## 1. Product Summary
 
-### 2.1 Smart Creation Workspace (Studio)
-- **Input & Smart Parsing**: Supports directly dropping in any long text or external links. The system automatically scrapes and extracts the core web content.
-- **Viral Rewrite**: Seamlessly sends extracted text into the "Viral Rewrite" pipeline. The AI automatically determines the original content type and rewrites it using three core prompt strategies (Short/Emotional, Medium/Insights, Professional/Hardcore).
-- **Smart Reply**: Generates highly human-like comments with one click under the current tweet, constrained by backend "Reply Strategies."
+VibeX is an AI growth copilot for X creators, solo builders, and technical founders. It helps the user define an account voice, generate native X posts and replies, publish with browser-side automation, collect performance data, and continuously improve future content through a local learning loop.
 
-### 2.2 Auto-Post Quality Control
-The automated posting pipeline consists of three minimalist yet robust stages: **Multi-dimensional Generation**, **Scoring Control**, and **Local Sandbox Dispatch**.
-- **Stage 1: Multi-dimensional Structured Generation**: Underlying Prompts preset high-quality writing frameworks (e.g., Short complaints, Quote retweets, Counter-intuitive judgments).
-- **Stage 2: AI Strict Self-Scoring**: The AI conducts a harsh self-evaluation based on core dimensions (hook, shareability, replyTrigger, etc.). Only tweets passing the threshold enter the queue.
-- **Stage 3: Local Sandbox Dispatch**: A purely local, physically isolated dispatch mechanism. Wakes up the target X page and publishes by authentically simulating mouse clicks and keyboard typing.
+The product is not a generic writing assistant. Its core promise is an account-specific growth system:
 
-### 2.3 Reply Strategies
-Targeted at the "Auto-Reply" mode. The system provides precise system Prompt settings (Contrarian, Expert, Minimal, Custom) for the AI to follow.
+- Connect to the user's X account.
+- Learn the user's public profile, avatar, recent posts, replies, and performance baseline.
+- Generate posts and replies in a consistent voice.
+- Save and review published content in Posts.
+- Feed real performance back into Loop after a stable measurement window.
+- Use the learned rules in later generation, rewriting, and reply decisions.
 
-### 2.4 Library & Self-Evolution (Posts & Loop)
-- **Rewrite & Save (Posts)**: High-quality tweets are rewritten and saved into the vault as "high-quality semi-finished products."
-- **Prediction Feedback Loop (Loop)**: A core self-evolution engine. The system predicts the performance of a draft. Once published, the user inputs the actual views/engagement. The AI calculates the deviation (`getDeviation`), extracts a learning rule (`aiLearning`), and updates its global memory (`aiMemory`). Future generations will adapt to these learned rules, constantly optimizing the AI's intuition for viral content.
-- **Style Training**: AI mimics historical highly-liked tweets (rhythm, filler words, Emoji habits).
+## 2. Goals
 
-### 2.5 Sandbox / Automation Engine (Auto)
-The autopilot module containing three core operating modes:
-1. **Auto-Engage**: Executes both "scheduled posting" and "automatically identifying and replying to high-value tweets."
-2. **Auto-Post**: Automatically publishes high-scoring candidate tweets at smart time intervals.
-3. **Auto-Reply**: Silently browses the timeline and automatically leaves highly human-like comments.
+### 2.1 Business Goals
 
-### 2.6 Cloud Sync & Data Security
-- **GitHub Gist Sync**: Supports purely serverless cloud sync. All user settings, prompts, library drafts, and AI memory are automatically and silently synchronized via a private GitHub PAT. Users can switch devices seamlessly without relying on third-party backend servers.
-- **Privacy First**: All data remains local or in the user's private Gist. 
+- Provide a usable Chrome extension for AI-assisted X growth without requiring a hosted backend.
+- Reduce the time required to write, rewrite, publish, and review X content.
+- Build a defensible product loop around account-specific memory and performance learning.
+- Support creator workflows across manual creation, semi-automated publishing, and background review.
 
-### 2.7 Language Handling & UI Architecture
-- **Global Persona**: Absolutely obeys the primary Engine Language.
-- **Native Language Understanding**: Accurately comprehends foreign tweets but forces output in the primary language, avoiding Algorithm Dilution.
-- **Minimalist Modern UI**: Follows modern SaaS sidebar patterns (e.g., top-level tabs for Studio/Posts/Loop/Auto, bottom-level utility icons for Settings/Profile).
+### 2.2 User Goals
 
-## 3. Security & Architecture
-- **Account Safety**: 10-hour working anti-addiction lock; native simulation of human behavior (scroll randomization, reading dwell time). Uses robust Intent URL injections.
-- **CWS Compliance**: Total eradication of DOM-based XSS (uses `document.createElement`); strict `manifest.json` host permissions.
+- Connect X once and let VibeX understand the account context.
+- Produce posts that sound like the user, not generic AI copy.
+- Automatically collect recent posts and performance metrics into Posts.
+- Learn from what actually performed instead of relying only on prompt guesses.
+- Keep control over publishing, API keys, language, and account strategy.
 
----
+### 2.3 Product Principles
 
-# VibeX 产品需求文档 (PRD)
+- Local-first: user configuration, posts, and memory are stored in Chrome local storage.
+- No Client Secret in extension code.
+- No LLM token consumption for metric sync or local Loop calculations.
+- Stable performance before learning: use a 48-hour review window before feeding post metrics into Loop.
+- Human-readable controls and logs: users should be able to tell what the agent did and why.
+- Safe automation: prefer official X pages, intent flows, and visible browser actions over hidden platform abuse.
 
-## 1. 产品定位
-**VibeX** 是一款专为 X (Twitter) 创作者打造的 AI 智能副驾插件。它的核心目标是：在完全模拟真实人类行为的前提下，实现 X 平台的流量全自动增长。它涵盖了自动化高质量互动、自动化风格化发文、智能素材收录、一键爆款重构功能，以及核心的 AI 自我进化闭环引擎。
+## 3. Target Users
 
-## 2. 核心功能模块
+### 3.1 Primary Persona
 
-### 2.1 智能创作工作区 (Studio)
-- **输入与智能解析**：支持直接丢入任意长文或外部链接，自动提取网页核心正文。
-- **一键爆款重构 (Viral Rewrite)**：系统自动判断原文类型并使用三大底层 Prompt 策略（短平快/情绪向、稍长内容/经验感悟、专业/硬核干货）进行重写。
-- **智能原生回复 (Smart Reply)**：一键生成极具人味的评论，受后台“默认回复策略”约束。
+Solo AI builders, indie hackers, technical founders, and AI/tech creators who want to build an opinionated X presence while continuing to ship product.
 
-### 2.2 自动发帖流派与质检机制
-包含 **多维生成**、**评分把控**、**本地调度** 三个阶段：
-- **多维结构化生成**：底层预设高质量写作框架（如反常识判断、可复制路径等）。
-- **AI 严格自评把控**：基于 6 个核心维度进行严苛自评，只有高分推文才会进入待发队列。
-- **本地沙盒智能调度**：高分草稿存放在本地缓存，通过真实模拟鼠标点击与键盘敲击输入完成发布，杜绝 API 滥用风险。
+### 3.2 Secondary Personas
 
-### 2.3 互动回复策略流派
-提供精确的系统 Prompt 设定：杠精流 (Contrarian)、专业流 (Expert)、极简流 (Minimal)、自定义 (Custom)。
+- Consultants or agency operators creating content for a personal brand.
+- Technical KOLs who need help turning complex ideas into native X posts.
+- Builders who want a lightweight performance memory system without a full social media backend.
 
-### 2.4 私有素材库与自我进化闭环 (Posts & Loop)
-- **改写入库 (Posts)**：遇到优质推文自动一键爆款重构并收藏，沉淀高质半成品。
-- **预测反馈闭环 (Loop)**：产品最核心的进化引擎。AI 在写完推文后会进行“流量预测”，帖子发布后用户填入“真实阅读量”，系统会自动计算偏差比率（Deviation），并让 AI 强行总结出一条“学习规则（aiLearning）”并写入全局记忆（aiMemory）。在此后的每一次创作中，大模型都会读取这些失败和成功的复盘经验，实现精准自纠偏。
-- **文风克隆**：100% 模仿用户历史高赞推文的断句节奏与情绪饱和度。
+## 4. Core User Journeys
 
-### 2.5 全自动沙盒引擎 (Auto)
-包含三种核心运作模式：
-1. **全自动活跃 (Auto-Engage)**：“定时发帖”与“自动回复高价值推文”双管齐下。
-2. **全自动发帖 (Auto-Post)**：按照智能时间间隔在后台唤醒标签页进行自动发帖。
-3. **全自动回复 (Auto-Reply)**：静默浏览时间线，自动在推文下方留下极具人味的评论。
+### 4.1 First-Time Setup
 
-### 2.6 云端无感同步机制 (Cloud Sync)
-- **Github Gist Serverless 同步**：支持通过个人的 Github PAT，将所有的全局设置、AI 记忆、库草稿等底层数据以加密 JSON 的形式静默同步到个人私密的 Gist 中。无需注册第三方账号，实现跨设备无缝办公。
+1. User opens the extension Options page.
+2. User configures AI provider and model.
+3. User connects X through OAuth 2.0 PKCE.
+4. VibeX stores the local OAuth connection state and refresh token when granted.
+5. VibeX opens or reuses the user's X Profile page and reads public handle, avatar, display name, bio, and visible recent posts/replies from the page DOM.
+6. Profile tab shows connected state and the user's circular X avatar once the page scan succeeds.
+7. VibeX seeds Account Voice and Posting Strategy from the scanned public profile and existing account context.
+8. VibeX scans visible high-signal posts/replies and creates an account performance baseline.
 
-### 2.7 语言策略与界面架构
-- **全局人设对齐 (Global Persona)**：发帖与回复绝对服从后台设置的主语言（Engine Language）。
-- **原生语言理解**：理解外文但强行使用主语言作答，避免 X 算法受众标签混杂（Algorithm Dilution）。
-- **现代极简 UI 架构**：侧边导航栏采用 SaaS 经典布局（上侧为 Studio/Posts/Loop/Auto 等核心业务，底部沉淀 Profile/Settings 基础图标）。
+### 4.2 Manual Creation
 
-## 3. 安全与架构规范
-- **账号防封禁安全**：10 小时防沉迷锁；通过滚动步长、阅读停留随机化模拟人类，使用 Intent URL 注入。
-- **扩展商店审核规范**：完全移除 `innerHTML` 风险操作；采用 `document.createElement` 安全渲染；严格限制 host permissions。
+1. User pastes text, a link, or source material into Studio.
+2. VibeX extracts or accepts the material.
+3. User runs Viral Rewrite, Smart Reply, Style Analysis, or related magic actions.
+4. Generation uses account persona, style samples, edit feedback, performance memory, and top-performing recent samples.
+5. User copies, edits, saves, or publishes the output.
+
+### 4.3 Auto Post
+
+1. User enables automation.
+2. VibeX generates a single high-quality post draft using account context and Loop memory.
+3. The draft is quality-checked and published through browser-side X automation.
+4. The published post is saved into Posts with status `published`.
+5. VibeX schedules one performance review at `publishedAt + 48h`.
+6. At review time, VibeX opens the post page and reads visible views, likes, replies, and reposts from the page.
+7. The result is saved into Posts and summarized into Loop.
+
+### 4.4 X Profile Scan
+
+1. User connects X or VibeX runs a scheduled local baseline scan.
+2. VibeX opens or reuses the user's X Profile page.
+3. VibeX reads public profile data and visible recent posts/replies from the DOM.
+4. Posts are merged into Posts by `statusId`, avoiding duplicates.
+5. Posts younger than 48 hours are stored but not used for Loop learning yet.
+6. Posts older than 48 hours with visible metrics are reviewed and can feed Loop once.
+7. Future scheduled review uses the same 48-hour rule for known posts.
+
+### 4.5 Loop Learning
+
+1. A post has a prediction or generated performance expectation.
+2. After stable metrics are available, VibeX compares actual views to the predicted range.
+3. The system classifies performance as hit, overestimated, underestimated, breakout, below baseline, or related status.
+4. VibeX creates a compact learning event and learned rule.
+5. Future generation prompts include relevant learned rules and top-performing account samples.
+
+## 5. Functional Requirements
+
+## 5.1 Profile
+
+### Requirements
+
+- Show account connection state for X.
+- On successful OAuth connection, display:
+  - handle
+  - connected state
+  - X avatar as a circular image
+- Remove marketing/help copy under Profile heading to keep the view compact.
+- Provide Disconnect control.
+- Seed Profile fields from public X Profile page data when the existing persona is empty or weak.
+- Respect selected Engine Language for generated persona and strategy text.
+
+### Acceptance Criteria
+
+- Connected account shows `Connected @username`.
+- Avatar uses the image URL read from the X Profile page and is displayed as a circle.
+- If avatar is unavailable, fallback icon is shown.
+- Disconnect clears local X auth state and restores fallback UI.
+
+## 5.2 X OAuth
+
+### Requirements
+
+- Use OAuth 2.0 Authorization Code with PKCE.
+- Auth URL: `https://x.com/i/oauth2/authorize`.
+- Callback path: `chrome.identity.getRedirectURL('x-oauth')`.
+- Support popup authorization flow.
+- Use public client only; never store or send Client Secret from the extension.
+- Use configured Client ID:
+  - `bDZmWnRPUW8zLXVaNmh1ZVVwdHA6MTpjaQ`
+- Request scopes:
+  - `tweet.read`
+  - `users.read`
+  - `offline.access`
+- Store refresh token when X grants it.
+
+### Callback URIs
+
+Production Chrome Web Store:
+
+`https://pnebfccjecdlpcjaonmppfidlipkojoj.chromiumapp.org/x-oauth`
+
+Local test extension:
+
+`https://lcpfgcaonmcncmhbiahcicgdeidjjnfi.chromiumapp.org/x-oauth`
+
+### Acceptance Criteria
+
+- No legacy Client ID remains.
+- No Client Secret exists in source.
+- OAuth can connect with the current X Developer App.
+- Refresh flow can renew expired access tokens when refresh token exists.
+
+## 5.3 Studio
+
+### Requirements
+
+- Accept manual text input.
+- Support link extraction paths where available.
+- Generate:
+  - viral rewrite
+  - draft reply
+  - style analysis
+  - visual prompt
+  - profile audit
+- Apply account context:
+  - Account Bio
+  - Account Voice
+  - Posting Strategy
+  - Agent Memory
+  - Style Training
+  - Edit Feedback
+  - Preference Memory
+  - Performance Memory
+  - Top-performing X samples
+- Enforce output language based on Engine Language.
+- For Viral Rewrite, output language must follow the user's configured Engine Language, regardless of input language. Input language is used only to understand the source material correctly.
+- Treat the user's current input as the only topic and intent source. Account samples, high-performing posts, Profile, and Loop memory may guide rhythm, hook strength, formatting, and tone only; they must not replace the subject, product, claim, or point of view of the current input.
+
+### Acceptance Criteria
+
+- Viral Rewrite and Draft Reply include performance memory and top-performing samples when available.
+- Viral Rewrite follows the configured Engine Language and preserves the current-input intent.
+- Generation output follows selected language setting.
+- Outputs avoid common AI phrasing, hashtags by default, external links when rewriting, and unsupported Markdown styling.
+
+## 5.4 Posts
+
+### Requirements
+
+Posts is the user's local content and performance vault.
+
+Each post record should support:
+
+- `id`
+- `text`
+- `origin`
+- `contentMode`
+- `status`
+- `statusId`
+- `postUrl`
+- `author`
+- `publishedAt`
+- `savedAt`
+- `actualViews`
+- `performanceMetrics`
+- `prediction`
+- `performanceStatus`
+- `aiLearning`
+- `reviewedAt`
+- `autoReviewEnabled`
+- `nextAutoReviewAt`
+
+Supported origins:
+
+- `manual_rewrite`
+- `auto_generated`
+- `collected`
+- `x_synced`
+
+Supported content modes:
+
+- `post`
+- `reply`
+- `rewrite`
+
+### X Profile Scan Behavior
+
+- On X connection or local baseline scan, read visible recent posts/replies from the user's X Profile page.
+- Merge by `statusId`.
+- Do not duplicate existing Posts records.
+- Preserve user-edited text when a synced record already exists.
+- Write scanned X records with origin `x_synced`.
+- Keep records younger than 48 hours in `published` state.
+- Review records after 48 hours when metrics are available.
+
+### Acceptance Criteria
+
+- Profile-scanned posts appear in Posts.
+- Existing records update metrics instead of duplicating.
+- 48-hour-old records can become reviewed and contribute to Loop.
+
+## 5.5 Loop
+
+### Requirements
+
+Loop converts post performance into reusable writing memory.
+
+Inputs:
+
+- reviewed Posts records
+- prediction range
+- actual views
+- likes
+- replies
+- reposts
+- bookmarks when available
+- content features
+
+Processing:
+
+- Infer content features.
+- Compute actual-vs-predicted deviation.
+- Classify relative performance against account baseline.
+- Generate learning event.
+- Compact learning events into active learned rules.
+
+Outputs:
+
+- `aiMemory.learningEvents`
+- `aiMemory.learnedRules`
+- updated `accountPerformanceBaseline`
+- top-performing account samples for prompt context
+
+### 48-Hour Review Rule
+
+VibeX should not feed a post into Loop immediately after publishing. New posts often have unstable metrics. The default behavior is:
+
+- Save post immediately after publishing or Profile scan.
+- Schedule one review at `publishedAt + 48h`.
+- At the 48-hour review, open the post page and read visible metrics once.
+- Update Posts and Loop.
+- Disable further auto review for that post.
+
+This flow does not consume LLM tokens or X API credits by default. It uses visible X pages and local JavaScript calculations. LLM tokens are only consumed when generating, rewriting, analyzing, or chatting.
+
+### Acceptance Criteria
+
+- No 90-minute recurring all-account performance sync.
+- Auto-generated posts are reviewed once after 48 hours.
+- X-synced posts younger than 48 hours are not used for Loop.
+- A reviewed post does not create duplicate Loop learning on later sync.
+
+## 5.6 Auto
+
+### Requirements
+
+- Allow user to enable/disable automation.
+- Support smart posting schedule and fixed interval schedule.
+- Generate one post at execution time rather than maintaining a large queue.
+- Publish through X page automation or official intent flow.
+- Track daily post count and session counters.
+- When AutoReply/AutoEngage starts, VibeX must open or wake an X home/feed tab and explicitly start the content-script browsing and scanning loop.
+- Before navigation, only treat an X editor as unfinished when a visible composer contains real text/draft content or has an enabled submit button. Hidden or empty X editors must not block switching to For You/Search.
+- Enforce safety stop after long continuous work.
+- Pause on likely automation errors.
+
+### Modes
+
+- Auto-Engage: posting plus reply discovery.
+- Auto-Post: posting only.
+- Auto-Reply: reply discovery and response only.
+
+### Acceptance Criteria
+
+- Automation state is visible in UI.
+- Publishing success writes content to Posts.
+- Publishing failure pauses automation and logs the reason.
+
+## 5.7 Reply Automation
+
+### Requirements
+
+- Discover relevant posts based on account strategy, topics, target handles, and quality thresholds.
+- Skip low-value engagement bait, ads, project accounts when unsuitable, and irrelevant targets.
+- Generate replies using selected reply strategy:
+  - Minimal
+  - Expert
+  - Contrarian
+  - Custom
+- Respect cooldowns and recent replied author history.
+
+### Acceptance Criteria
+
+- Own posts are skipped.
+- Low-value replies are rejected.
+- Replies use account context and language settings.
+
+## 5.8 Language
+
+### Requirements
+
+- Engine Language controls model output language.
+- `auto` should infer from browser/system language.
+- UI text should follow configured language where translation exists.
+- Persona analysis should produce Account Voice and Posting Strategy in the selected language.
+
+### Supported Languages
+
+- Chinese
+- English
+- Japanese
+- Spanish
+- Indonesian
+
+### Acceptance Criteria
+
+- Account Voice and Posting Strategy are not hardcoded to Chinese.
+- Rewrite and reply outputs obey Engine Language.
+
+## 6. Non-Functional Requirements
+
+### 6.1 Privacy
+
+- Store user data locally in Chrome storage.
+- Do not send Client Secret.
+- Do not introduce a hosted backend requirement.
+- Only send user content to configured LLM provider when generation or analysis is requested.
+- Metric sync does not call LLM.
+
+### 6.2 Reliability
+
+- MV3 service worker must tolerate sleep/wake behavior.
+- Alarms should be used for scheduled work.
+- Long-running actions should write logs.
+- Optional X API enhancement failures should never block the default page-scan flow.
+- Token expiry should use refresh token when available; otherwise prompt reconnect through logs/errors.
+
+### 6.3 Performance
+
+- Avoid frequent polling.
+- Avoid recurring 90-minute all-account metric sync.
+- Use 48-hour post-level review for stable metrics.
+- Keep local vault bounded to avoid uncontrolled storage growth.
+
+### 6.4 Security
+
+- Avoid unsafe DOM injection.
+- Use DOM APIs for UI rendering.
+- Keep OAuth public-client safe.
+- Restrict host permissions to required X/Twitter and configured extraction/API endpoints.
+
+## 7. Data Model
+
+### 7.1 X Auth
+
+```json
+{
+  "connected": true,
+  "clientId": "string",
+  "accessToken": "string",
+  "refreshToken": "string",
+  "expiresAt": 0,
+  "scope": "tweet.read users.read offline.access",
+  "user": {
+    "id": "string",
+    "name": "string",
+    "username": "string",
+    "description": "string",
+    "profile_image_url": "string",
+    "public_metrics": {}
+  },
+  "connectedAt": 0
+}
+```
+
+### 7.2 Post Record
+
+```json
+{
+  "id": "string",
+  "text": "string",
+  "origin": "manual_rewrite | auto_generated | collected | x_synced",
+  "contentMode": "post | reply | rewrite",
+  "status": "draft | published | reviewed",
+  "statusId": "string",
+  "postUrl": "string",
+  "author": "string",
+  "authorName": "string",
+  "savedAt": 0,
+  "publishedAt": 0,
+  "actualViews": 0,
+  "performanceMetrics": {
+    "views": 0,
+    "likes": 0,
+    "replies": 0,
+    "reposts": 0,
+    "bookmarks": 0,
+    "follows": 0
+  },
+  "prediction": {},
+  "performanceStatus": "hit | overestimated | underestimated | unknown",
+  "aiLearning": "string",
+  "reviewedAt": 0,
+  "autoReviewEnabled": true,
+  "nextAutoReviewAt": 0
+}
+```
+
+### 7.3 AI Memory
+
+```json
+{
+  "learningEvents": [],
+  "learnedRules": [],
+  "lastReviewedAt": 0,
+  "updatedAt": 0
+}
+```
+
+### 7.4 Account Performance Baseline
+
+```json
+{
+  "sampleCount": 0,
+  "averageViews": 0,
+  "medianViews": 0,
+  "p75Views": 0,
+  "p90Views": 0,
+  "topPosts": [],
+  "handle": "string",
+  "updatedBy": "profile_scan | auto_review | optional_x_api_sync",
+  "scannedAt": 0
+}
+```
+
+## 8. Technical Architecture
+
+### 8.1 Extension Surfaces
+
+- `background.js`: service worker, scheduling, OAuth orchestration, post sync, auto review, generation orchestration.
+- `content/x_scraper.js`: X page scraping for profile, metrics, and opportunity scanning.
+- `content/x_automator.js`: browser-side posting and reply automation.
+- `options/options.html`: app shell.
+- `options/ui/settings.js`: Profile, settings, X connection UI, configuration persistence.
+- `options/ui/logs.js`: Posts, Loop, logs rendering.
+- `services/xApi.js`: OAuth and X API access.
+- `services/llm.js`: model provider calls.
+- `core/performanceLoop.js`: prediction, review, baseline, and learning rules.
+- `core/generationContext.js`: prompt context assembly.
+- `core/storageSchema.js`: normalized post and memory schema.
+
+### 8.2 Scheduling
+
+- `postTweetAlarm`: scheduled publishing.
+- `performanceReviewAlarm`: post-level performance review.
+- `autoShutdownAlarm`: safety stop.
+
+The performance review alarm should point to the next post whose `nextAutoReviewAt` is due. For default behavior, that timestamp is 48 hours after publish or X sync creation time.
+
+### 8.3 X API Usage
+
+Default free-product behavior:
+
+- X OAuth is used to establish account connection state.
+- Profile identity, avatar, bio, and historical samples are read from visible X pages by DOM scan.
+- 48-hour post review opens the post page and reads visible metrics.
+- The default product path should not require VibeX to provide X API credits.
+
+Optional future paid/enhanced endpoints:
+
+- `/users/me`
+- `/users/:id/tweets`
+- `/tweets/:id`
+
+Usage rules:
+
+- Do not call X data APIs automatically in the default free flow.
+- X API reads may be introduced as an explicit paid/enhanced mode with clear cost controls.
+- Metric scan does not use the LLM provider and does not consume LLM tokens.
+
+## 9. Logging Requirements
+
+Run Logs should clearly show:
+
+- Extension install/update.
+- X OAuth request and connection.
+- X connection failure and actionable error.
+- Profile scan summary.
+- Baseline scan start/success/fallback.
+- Post generation and publish success.
+- 48-hour performance review start/success/failure.
+- Config saves.
+
+## 10. Product Metrics
+
+### Activation
+
+- X connected successfully.
+- API key configured successfully.
+- Account profile seeded.
+
+### Engagement
+
+- Posts generated.
+- Posts saved.
+- Posts published.
+- Manual rewrites performed.
+- Replies generated and sent.
+
+### Learning
+
+- Posts reviewed after 48 hours.
+- Learning events created.
+- Learned rules count.
+- Baseline sample count.
+- Percentage of generated posts with reviewed metrics.
+
+### Quality
+
+- Generation rejection rate.
+- Prediction accuracy.
+- Manual edit rate.
+- User likes/dislikes on generated content.
+
+## 11. Risks and Mitigations
+
+### X OAuth Configuration Risk
+
+Risk: X Developer App callback URI or app type misconfiguration blocks OAuth.
+
+Mitigation: show precise Client ID, callback URI, app type, and scope in logs.
+
+### Token Expiry Risk
+
+Risk: access token expires before metric review.
+
+Mitigation: request `offline.access`, store refresh token, and prompt reconnect if refresh is unavailable.
+
+### API Credit Risk
+
+Risk: default product behavior consumes VibeX-owned X API credits.
+
+Mitigation: do not use X data API calls in the free default flow. Use Profile/page scan for account identity, historical samples, and 48-hour performance review. Keep X API access as an optional future paid/enhanced path only.
+
+### Premature Learning Risk
+
+Risk: early views distort Loop memory.
+
+Mitigation: only feed Loop after 48-hour review.
+
+### Automation Safety Risk
+
+Risk: repeated browser automation can look unnatural.
+
+Mitigation: cooldowns, safety stop, low-value filtering, visible browser actions, and conservative scheduling.
+
+## 12. Out of Scope
+
+- Server-hosted dashboard.
+- Multi-account management.
+- Full historical backfill beyond current X API endpoint limits.
+- Paid analytics ingestion.
+- Team collaboration.
+- Guaranteed X algorithm growth.
+- Using Client Secret inside extension code.
+
+## 13. Release Criteria
+
+- OAuth connection works for local and production callback URI.
+- Connected Profile shows handle and circular X avatar.
+- Profile scan writes visible recent posts/replies into Posts without duplicates.
+- Posts younger than 48 hours do not feed Loop.
+- Posts at or older than 48 hours can be reviewed once and update Loop.
+- No recurring 90-minute metric polling or default X API metric sync remains.
+- Auto-generated posts are scheduled for one 48-hour review.
+- Generation context includes Account Voice, Posting Strategy, Agent Memory, Style Training, Performance Memory, and top-performing samples.
+- Checks pass:
+  - `node --check background.js`
+  - `node --check services/xApi.js`
+  - `node --check options/ui/settings.js`
+  - `node --check options/options.js`
+  - `node --check core/storageSchema.js`
+  - `node --check core/logCatalog.js`
+  - `manifest.json` parse
+  - loop tests

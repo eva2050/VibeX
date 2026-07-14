@@ -1,6 +1,8 @@
 import { memoryValueToText } from '../utils/textUtils.js';
 import { AGENT_MEMORY_LABELS, DEFAULT_AGENT_MEMORY, selectGrowthPlaybook } from './constants.js';
-import { MEMORY_FIELD_PROTOCOL } from './storageSchema.js';
+import { MEMORY_FIELD_PROTOCOL, POST_CONTENT_MODE } from './storageSchema.js';
+import { getPromptText } from './i18n.js';
+import { formatStyleSampleLearningForPrompt } from './styleLearning.js';
 
 function normalizeAgentMemory(memory = {}) {
   return { ...DEFAULT_AGENT_MEMORY, ...(memory || {}) };
@@ -43,9 +45,21 @@ function formatAgentMemoryForPrompt(memory = {}) {
     : '暂无长期记忆。请基于账号简介和当前策略保守生成，不要编造不可验证经历。';
 }
 
-function formatPerformanceMemoryForPrompt(aiMemory = {}) {
+function getContentModeForPrompt(promptType = '') {
+  if (promptType === 'auto_post') return POST_CONTENT_MODE.POST;
+  if (promptType === 'draft_reply') return POST_CONTENT_MODE.REPLY;
+  return POST_CONTENT_MODE.REWRITE;
+}
+
+function formatPerformanceMemoryForPrompt(aiMemory = {}, options = {}) {
+  const contentMode = options.contentMode || POST_CONTENT_MODE.POST;
   const rules = Array.isArray(aiMemory?.learnedRules) ? aiMemory.learnedRules : [];
-  const lines = rules
+  const relevantRules = rules.filter((rule) => {
+    if (!rule?.contentMode) return contentMode !== POST_CONTENT_MODE.REPLY;
+    if (rule.contentMode === contentMode) return true;
+    return contentMode === POST_CONTENT_MODE.REPLY && rule.contentMode === POST_CONTENT_MODE.POST;
+  });
+  const lines = relevantRules
     .slice(0, 8)
     .map((rule, index) => {
       const text = truncateForPrompt(rule?.text || rule, 360);
@@ -61,13 +75,70 @@ function formatPerformanceMemoryForPrompt(aiMemory = {}) {
     .filter(Boolean);
 
   if (lines.length === 0) {
-    return '暂无发布表现记忆。生成后需要进入 Posts 回填实际表现，Loop 才能持续校准。';
+    return getPromptText(options.lang, 'performanceMemoryEmpty');
   }
 
   return [
-    '以下规则来自已发布内容的预测偏差与用户回填表现。它们优先级高于通用爆款模板，但不要因为单条样本过度重复同一种写法：',
+    getPromptText(options.lang, 'performanceMemoryIntro'),
     ...lines
   ].join('\n');
+}
+
+function formatTopSampleLine(post = {}, index = 0) {
+  const metrics = post.performanceMetrics || {};
+  const metricText = [
+    `${Number(post.actualViews || metrics.views || 0)} views`,
+    Number(metrics.likes) ? `${Number(metrics.likes)} likes` : '',
+    Number(metrics.reposts) ? `${Number(metrics.reposts)} reposts` : '',
+    Number(metrics.replies) ? `${Number(metrics.replies)} replies` : ''
+  ].filter(Boolean).join(', ');
+  const mode = post.contentMode === 'reply' ? 'reply' : 'post';
+  const text = truncateForPrompt(post.text || '', 260);
+  return `${index + 1}. [${mode}; ${metricText}] ${text}`;
+}
+
+function uniqueTopSamples(posts = [], limit = 3) {
+  const seen = new Set();
+  return (Array.isArray(posts) ? posts : [])
+    .filter((post) => {
+      const key = post.statusId || post.id || post.text;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return Boolean(post.text);
+    })
+    .slice(0, limit);
+}
+
+function formatSampleGroup(title, posts = []) {
+  const samples = uniqueTopSamples(posts, 6);
+  if (samples.length === 0) return '';
+  const lines = samples
+    .map((post, index) => formatTopSampleLine(post, index))
+    .filter(Boolean);
+  return lines.length ? `${title}\n${lines.join('\n')}` : '';
+}
+
+function formatTopPostsForPrompt(baseline = {}) {
+  const groups = [
+    formatSampleGroup('Top 6 by views across posts/replies:', baseline.topByViews),
+    formatSampleGroup('Top 6 by likes across posts/replies:', baseline.topByLikes),
+    formatSampleGroup('Top 6 replies by views:', baseline.topRepliesByViews),
+    formatSampleGroup('Top 6 replies by likes:', baseline.topRepliesByLikes)
+  ].filter(Boolean);
+
+  if (groups.length === 0) {
+    const topPosts = Array.isArray(baseline?.topPosts) ? baseline.topPosts : [];
+    const lines = uniqueTopSamples(topPosts, 12)
+      .map((post, index) => formatTopSampleLine(post, index))
+      .filter(Boolean);
+    if (lines.length === 0) return '';
+    groups.push(`Top-performing account samples from recent scan:\n${lines.join('\n')}`);
+  }
+
+  return [
+    'Historical high-signal account samples. Use them only as empirical signal for hook strength, pacing, format, emotional temperature, and reply style. Do not copy their language, topic, product, claim, or point of view. The current input remains the only topic source:',
+    ...groups
+  ].join('\n\n');
 }
 
 function formatPlaybookForPrompt(playbook = {}) {
@@ -83,11 +154,9 @@ function formatPlaybookForPrompt(playbook = {}) {
 }
 
 function formatStyleTrainingForPrompt(styleTrainingData) {
-  const examples = Array.isArray(styleTrainingData)
-    ? styleTrainingData.filter(Boolean).join('\n---\n')
-    : memoryValueToText(styleTrainingData).trim();
-  if (!examples) return '';
-  return `\n【严格文风约束】：必须100%模仿以下参考素材的断句节奏、用词习惯（如特定语气词、emoji）、情绪饱和度以及排版结构。请提取并在输出中重现这种独特的个人风格，杜绝任何AI感。\n<文风参考>\n${examples}\n</文风参考>\n\n`;
+  const learning = formatStyleSampleLearningForPrompt(styleTrainingData, { limit: 5 });
+  if (!learning) return '';
+  return `\n<优质样本>\n${learning}\n</优质样本>\n\n【极度严格的输出约束】：\n1. 你必须只学习优质样本的“活人感、具体观察、轻判断、自然短文”风格。\n2. 学习样本的 Hook 方式、断句节奏和留白格式。\n3. 严禁使用任何常见 AI 模板（如“最反直觉的一点是”、“底层逻辑是”、“本质是”）。\n4. 如果输入素材太短，绝对不要把它硬扩写成长篇大论，请保持短小精悍的观察或吐槽。\n5. 严禁借用样本的具体题材、产品名或业务数据；不要编造年份或不存在的行业报告。\n6. 输出语言必须完全服从后台 Engine Language，不跟随素材语种。\n\n`;
 }
 
 function formatPreferenceMemoryForPrompt(config = {}, promptType = '') {
@@ -135,6 +204,8 @@ function buildGenerationContext(config = {}, options = {}) {
     leadTarget: config.leadTarget
   });
   const promptType = options.promptType || 'auto_post';
+  const contentMode = getContentModeForPrompt(promptType);
+  const lang = options.lang || config.engineLanguage || 'auto';
 
   return {
     memoryProtocol: MEMORY_FIELD_PROTOCOL,
@@ -143,7 +214,9 @@ function buildGenerationContext(config = {}, options = {}) {
     agentMemory,
     playbook,
     agentMemoryPrompt: formatAgentMemoryForPrompt(agentMemory),
-    performanceMemoryPrompt: formatPerformanceMemoryForPrompt(config.aiMemory),
+    contentMode,
+    performanceMemoryPrompt: formatPerformanceMemoryForPrompt(config.aiMemory, { contentMode, lang }),
+    topPerformancePrompt: formatTopPostsForPrompt(config.accountPerformanceBaseline),
     playbookPrompt: formatPlaybookForPrompt(playbook),
     stylePrompt: formatStyleTrainingForPrompt(config.styleTrainingData),
     editFeedbackPrompt: formatEditFeedbackForPrompt(config.feedbackLoopData, promptType),
@@ -158,6 +231,8 @@ export {
   buildGenerationContext,
   formatAgentMemoryForPrompt,
   formatPerformanceMemoryForPrompt,
+  formatStyleTrainingForPrompt,
+  formatTopPostsForPrompt,
   formatPlaybookForPrompt,
   normalizeAgentMemory,
   truncateForPrompt

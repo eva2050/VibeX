@@ -1,4 +1,5 @@
 import { renderVault, renderAiMemory } from './logs.js';
+import { normalizeEngineLanguage, toHtmlLang } from '../../core/i18n.js';
 
 // Fragment dictionary: short Chinese terms → target language
 // These are applied as global string replacements, no regex magic needed.
@@ -42,9 +43,6 @@ const _fragDict = {
   'AI 回复为空': { en: 'AI reply is empty', ja: 'AIの返信が空です', es: 'Respuesta de IA vacía', id: 'Balasan AI kosong' },
   '机会分': { en: 'Score:', ja: 'スコア:', es: 'Puntuación:', id: 'Skor:' },
   '互动机会分': { en: 'Opportunity score', ja: '機会スコア', es: 'Puntuación de oportunidad', id: 'Skor peluang' },
-  '同步到云端失败:': { en: 'Failed to sync to cloud:', ja: 'クラウドへの同期に失敗しました:', es: 'Error al sincronizar en la nube:', id: 'Gagal menyinkronkan ke cloud:' },
-  '从云端拉取配置失败:': { en: 'Failed to pull from cloud:', ja: 'クラウドからの取得に失敗しました:', es: 'Error al extraer de la nube:', id: 'Gagal menarik dari cloud:' },
-  '已成功从云端 (Github Gist) 拉取最新配置。': { en: 'Successfully pulled latest config from cloud (Github Gist).', ja: 'クラウド (Github Gist) から最新設定を取得しました。', es: 'Configuración más reciente extraída con éxito (Github Gist).', id: 'Berhasil menarik konfigurasi terbaru dari cloud (Github Gist).' },
   '随时': { en: 'anytime', ja: 'いつでも', es: 'en cualquier momento', id: 'kapan saja' },
   '未知': { en: 'unknown', ja: '不明', es: 'desconocido', id: 'tidak diketahui' },
   '无': { en: 'none', ja: 'なし', es: 'ninguno', id: 'tidak ada' },
@@ -59,9 +57,7 @@ const _fragKeys = Object.keys(_fragDict).sort((a, b) => b.length - a.length);
 
 export function getCurrentLang() {
   const langInput = document.getElementById('engine-language');
-  let lang = langInput ? langInput.value : 'zh';
-  if (lang === 'auto') lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
-  return lang;
+  return normalizeEngineLanguage(langInput ? langInput.value : 'zh', navigator.language);
 }
 
 export function t(key, fallback) {
@@ -71,9 +67,7 @@ export function t(key, fallback) {
 }
 
 export function translateBackendLog(msg, lang, depth = 0) {
-  if (lang === 'auto') {
-    lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
-  }
+  lang = normalizeEngineLanguage(lang || 'auto', navigator.language);
   if (lang === 'zh' || !lang || depth > 5) return msg;
   let translated = msg;
 
@@ -118,10 +112,9 @@ export function translateBackendLog(msg, lang, depth = 0) {
 }
 
 export function applyLanguage(lang) {
-  if (lang === 'auto') {
-    lang = navigator.language.startsWith('zh') ? 'zh' : 'en';
-  }
+  lang = normalizeEngineLanguage(lang, navigator.language);
   const dict = window.i18nDict[lang] || window.i18nDict.en;
+  document.documentElement.lang = toHtmlLang(lang, navigator.language);
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const key = el.getAttribute('data-i18n');
     if (dict[key]) {

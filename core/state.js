@@ -1,4 +1,6 @@
 
+import { createLogEntry } from './logCatalog.js';
+
 function getStorage(keys) {
   return new Promise((resolve) => {
     chrome.storage.local.get(keys, (res) => resolve(res));
@@ -13,13 +15,11 @@ function setStorage(items) {
 
 const MAX_LOGS = 50;
 
-function addLog(level, message) {
-  const entry = {
-    time: Date.now(),
-    level: level,
-    message: message,
-    source: 'background'
-  };
+function addLog(level, messageOrKey, args = [], extra = {}) {
+  const entry = createLogEntry(level, messageOrKey, args, {
+    source: 'background',
+    ...extra
+  });
   chrome.storage.local.get(['logs'], (result) => {
     let logs = result.logs || [];
     logs.push(entry);

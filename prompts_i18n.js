@@ -160,16 +160,18 @@ Author: @${author}
 Content: ${text}
 
 [Strict Anti-AI & Formatting Rules]:
-- FORBIDDEN AI WORDS: Never use phrases like "In today's fast-paced world", "Let's dive in", "It's worth noting", "Ultimately", "A testament to".
+- FORBIDDEN AI WORDS: Never use phrases like "Most founders/creators...", "That's the edge", "In today's fast-paced world", "Let's dive in", "It's worth noting", "Ultimately", "A testament to".
 - DO NOT use cliché marketing intros like "Fun fact:" or "Takeaway:". Start abruptly and sharply.
 - The tone must be extremely conversational and grounded. Write like a real person typing on their phone. Minor conversational flaws or emotional vents are encouraged.
-- [Visual Breathing Room]: You MUST use line breaks (empty lines) between paragraphs. Never clump sentences together.
+- [NO OVER-SEGMENTATION]: DO NOT use the "one sentence, one empty line" format. Only use line breaks when logically separating paragraphs. Keep it to 1-2 paragraphs max unless original is very long.
+- [NO HALLUCINATION]: Preserve the original subjects. Never hallucinate facts, data, years, companies, or reports not in the original text. Do not over-expand short inputs into long threads.
 - [Social Micro-expressions]: Naturally append 1-2 emojis (e.g., 😅, 🤔, 🔥) at the end of sentences or emotional peaks.
 - **ABSOLUTE FORBIDDEN: DO NOT GENERATE ANY HASHTAGS (#)!**
+- **ABSOLUTE FORBIDDEN: DO NOT INCLUDE EXTERNAL URLS IN THE BODY!**
 
 [Writing Constraints]:
 - Write in the first person. Include insights, stories, or strong judgments.
-- Keep it Twitter-native: concise, scannable.
+- Keep it Twitter-native: concise, scannable, punchy.
 - DO NOT just copy the original wording. Synthesize and reconstruct.
 - Output ONLY the rewritten text. NO intro text like "Here is the rewrite:".
 IMPORTANT REMINDER: The output MUST be in ${outputLang}.`,
@@ -196,10 +198,11 @@ IMPORTANT REMINDER: The output MUST be in ${outputLang}.`,
 内容：${text}
 
 【极其严格的反AI味与 X 平台算法排版约束】：
-- 绝对禁止使用任何典型的AI套话，包括但不限于：“在这个瞬息万变的时代”、“深入探讨”、“不仅...而且”、“总而言之”、“毋庸置疑”、“赋能”、“底层逻辑”、“值得注意的是”、“让我们一起”。
+- 绝对禁止使用任何典型的AI套话，包括但不限于：“最反直觉的一点”、“底层逻辑”、“大多数人以为”、“在这个瞬息万变的时代”、“深入探讨”、“不仅...而且”、“总而言之”、“毋庸置疑”、“值得注意的是”。
 - 【Hook（钩子）至上】：开头必须是反常识观点、情绪暴论或信息落差，直接抓人眼球。绝对禁止使用“冷知识：”、“划重点：”、“事实证明”这种俗套的营销号开头！
-- 句子必须极其口语化、接地气。像真实网友随手在手机上敲出来的文字。
-- 【极度追求视觉呼吸感】：长文本必须频繁分段！每一句话或每两句话之间**必须**留出空行，绝不要把多句话挤在一团，以此拉长读者停留时间。
+- 句子必须极度短促、口语化、接地气。像真实网友随手在手机上敲出来的文字。
+- 【绝对禁止过度分行】：默认只分 1~2 段。坚决反对“一句话一空行”的长文排版。如果输入素材很短，不要硬扩写。
+- 【绝对禁止编造】：必须保留原文核心对象。绝对不要编造原文没有的数据、年份、公司名、机构报告或商业结论。
 - 【社交化微表情】：请在句尾自然地加上1-2个Emoji（例如😅、🤔、🔥等）。
 - **绝对禁忌一：绝对禁止生成任何 #标签 (Hashtag)！**
 - **绝对禁忌二：绝对禁止在生成正文中包含任何外部 URL 链接（外链会被严厉限流）！原有的外链请用文字概括。**

@@ -1,19 +1,21 @@
 import { getCurrentLang, translateBackendLog, t } from './i18n.js';
 import { showToast, recordFeedbackLoop } from '../options.js';
-import { POST_STATUS, normalizePostRecord } from '../../core/storageSchema.js';
+import { POST_STATUS, normalizePostRecord, POST_ORIGIN } from '../../core/storageSchema.js';
+import { applyPerformanceReview, getBaseline, getPerformanceMetrics, inferContentFeatures, classifyRelativePerformance, updateAiMemoryWithReviewedPost } from '../../core/performanceLoop.js';
+import { renderLogEntry } from '../../core/logCatalog.js';
 
 export function renderLogs(logsArray) {
   const container = document.getElementById('engine-logs');
   if (!container || !Array.isArray(logsArray)) return;
   container.innerHTML = '';
   const lang = getCurrentLang();
-  
+
   // Render newest first
   for (let i = logsArray.length - 1; i >= 0; i--) {
     const entry = logsArray[i];
     const timeStr = new Date(entry.time || Date.now()).toLocaleTimeString(lang === 'en' ? 'en-US' : 'zh-CN', { hour12: false });
-    const message = translateBackendLog(entry.message || '', lang);
-    
+    const message = renderLogEntry(entry, lang, translateBackendLog);
+
     const div = document.createElement('div');
     div.className = `log-entry ${entry.level || entry.type || 'system'}`;
     div.textContent = `[${timeStr}] ${message}`;
@@ -43,11 +45,10 @@ export function renderAiMemory(memory = {}, vault = []) {
 
   const rules = Array.isArray(memory.learnedRules) ? memory.learnedRules : [];
   const reviewedPosts = Array.isArray(vault) ? vault.filter(item => Number(item?.actualViews) > 0) : [];
-  const accuratePosts = reviewedPosts.filter(item => {
-    const prediction = inferPrediction(item);
-    return getDeviation(prediction, Number(item.actualViews)).status === 'hit';
+  const workedPosts = reviewedPosts.filter(item => {
+    return item.relativePerformance === 'breakout' || item.relativePerformance === 'top_decile';
   });
-  const accuracy = reviewedPosts.length > 0 ? Math.round((accuratePosts.length / reviewedPosts.length) * 100) : null;
+  const accuracy = reviewedPosts.length > 0 ? Math.round((workedPosts.length / reviewedPosts.length) * 100) : null;
 
   const reviewedEl = document.getElementById('learning-reviewed-count');
   const accuracyEl = document.getElementById('learning-accuracy');
@@ -104,188 +105,17 @@ function parseViewsInput(raw) {
   return Math.round(base);
 }
 
-function inferPrediction(item = {}) {
-  if (item.prediction?.minViews && item.prediction?.maxViews) return item.prediction;
 
-  const text = item.text || '';
-  const length = text.length;
-  const lineCount = text.split('\n').filter(Boolean).length;
-  const hasNumbers = /\d/.test(text);
-  const hasQuestion = /[?？]/.test(text);
-  const hasExternalLink = /https?:\/\//i.test(text);
-  const hasStrongHook = /(stop|never|why|truth|mistake|secret|unpopular|hot take|别|不要|为什么|真相|错了|反常识|爆款|踩坑)/i.test(text);
-
-  let score = 2600;
-  if (length >= 80 && length <= 240) score += 1400;
-  if (lineCount >= 3) score += 1200;
-  if (hasNumbers) score += 900;
-  if (hasQuestion) score += 700;
-  if (hasStrongHook) score += 1800;
-  if (hasExternalLink) score -= 1200;
-
-  const midpoint = clamp(score, 500, 60000);
-  const minViews = roundToNiceNumber(midpoint * 0.55);
-  const maxViews = roundToNiceNumber(midpoint * 1.65);
-  const confidence = clamp(48 + (hasStrongHook ? 8 : 0) + (lineCount >= 3 ? 6 : 0) - (hasExternalLink ? 10 : 0), 35, 72);
-
-  let reason = 'Clear post structure with moderate reach potential.';
-  if (hasStrongHook) reason = 'Strong hook signal, but actual reach still depends on timing and account distribution.';
-  else if (hasExternalLink) reason = 'External links usually suppress reach, so prediction is conservative.';
-  else if (lineCount >= 3) reason = 'Readable spacing may improve dwell time.';
-
-  return {
-    minViews,
-    maxViews,
-    confidence,
-    reason,
-    source: 'heuristic_v1',
-    createdAt: Date.now()
-  };
-}
-
-function getPredictionMidpoint(prediction) {
-  return Math.max(1, Math.round(((Number(prediction.minViews) || 0) + (Number(prediction.maxViews) || 0)) / 2));
-}
-
-function getDeviation(prediction, actualViews) {
-  const midpoint = getPredictionMidpoint(prediction);
-  const ratio = (actualViews - midpoint) / midpoint;
-  const abs = Math.abs(ratio);
-  let status = 'hit';
-  if (ratio > 0.35) status = 'underestimated';
-  if (ratio < -0.35) status = 'overestimated';
-  return {
-    ratio,
-    status,
-    label: status === 'hit' ? 'Hit' : status === 'underestimated' ? 'Underestimated' : 'Overestimated',
-    detail: status === 'hit' ? 'within range' : `${Math.round(abs * 100)}% ${ratio > 0 ? 'above' : 'below'} prediction`
-  };
-}
-
-function buildLearning(item, deviation) {
-  const text = item.text || '';
-  const hasLink = /https?:\/\//i.test(text);
-  const hasQuestion = /[?？]/.test(text);
-  const hasStrongHook = /(stop|never|why|truth|mistake|secret|unpopular|hot take|别|不要|为什么|真相|错了|反常识|爆款|踩坑)/i.test(text);
-
-  if (deviation.status === 'hit') {
-    return 'This prediction pattern is usable for similar posts.';
-  }
-  if (deviation.status === 'overestimated') {
-    if (!hasStrongHook) return 'Lower future predictions when the post lacks a sharp first-line hook.';
-    if (hasLink) return 'External links can suppress reach; discount future predictions for linked posts.';
-    return 'The idea looked strong, but the hook may need more conflict before predicting high reach.';
-  }
-  if (hasQuestion) return 'Question-style hooks may deserve a higher reach estimate when they invite clear disagreement.';
-  return 'Raise future estimates for concise posts that outperform without heavy structure.';
-}
-
-function getPostFingerprint(text = '') {
-  return String(text || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120);
-}
-
-function buildLearningEvent(post, deviation) {
-  if (!post?.aiLearning || !deviation || deviation.status === 'hit') return null;
-  return {
-    id: `${post.id || post.savedAt || Date.now()}-${post.reviewedAt || Date.now()}`,
-    text: post.aiLearning,
-    sourcePostId: post.id || String(post.savedAt || Date.now()),
-    postText: getPostFingerprint(post.text),
-    prediction: post.prediction || null,
-    actualViews: Number(post.actualViews) || 0,
-    deviationRatio: post.deviationRatio,
-    performanceStatus: post.performanceStatus || deviation.status,
-    reviewedAt: post.reviewedAt || Date.now(),
-    createdAt: Date.now()
-  };
-}
-
-function compactLearningEventsIntoRules(events = [], existingRules = []) {
-  const existingByText = new Map(
-    (Array.isArray(existingRules) ? existingRules : [])
-      .filter(rule => rule?.text)
-      .map(rule => [rule.text, rule])
-  );
-  const grouped = new Map();
-
-  (Array.isArray(events) ? events : []).forEach((event) => {
-    const text = String(event?.text || '').trim();
-    if (!text) return;
-    const existingRule = existingByText.get(text);
-    const current = grouped.get(text) || {
-      text,
-      sampleCount: 0,
-      positiveCount: 0,
-      negativeCount: 0,
-      maxAbsDeviation: 0,
-      lastDeviationRatio: 0,
-      sourcePostIds: [],
-      examples: [],
-      createdAt: existingRule?.createdAt || event.createdAt || Date.now()
-    };
-
-    const ratio = Number(event.deviationRatio) || 0;
-    current.sampleCount += 1;
-    if (event.performanceStatus === 'underestimated') current.positiveCount += 1;
-    if (event.performanceStatus === 'overestimated') current.negativeCount += 1;
-    current.maxAbsDeviation = Math.max(current.maxAbsDeviation || 0, Math.abs(ratio));
-    current.lastDeviationRatio = ratio;
-    current.updatedAt = Math.max(Number(current.updatedAt) || 0, Number(event.reviewedAt || event.createdAt) || Date.now());
-    if (event.sourcePostId && !current.sourcePostIds.includes(event.sourcePostId)) {
-      current.sourcePostIds.push(event.sourcePostId);
-    }
-    if (event.postText && !current.examples.includes(event.postText)) {
-      current.examples.push(event.postText);
-    }
-    grouped.set(text, current);
-  });
-
-  existingByText.forEach((rule, text) => {
-    if (!grouped.has(text)) grouped.set(text, rule);
-  });
-
-  return Array.from(grouped.values())
-    .map(rule => ({
-      ...rule,
-      sourcePostIds: Array.isArray(rule.sourcePostIds) ? rule.sourcePostIds.slice(0, 8) : [],
-      examples: Array.isArray(rule.examples) ? rule.examples.slice(0, 3) : [],
-      confidence: Math.min(95, Math.round(35 + (Number(rule.sampleCount) || 1) * 12 + (Number(rule.maxAbsDeviation) || 0) * 20))
-    }))
-    .sort((a, b) => {
-      const confidenceDiff = (Number(b.confidence) || 0) - (Number(a.confidence) || 0);
-      if (confidenceDiff !== 0) return confidenceDiff;
-      return (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0);
-    })
-    .slice(0, 12);
-}
 
 function updateAiMemoryWithLearning(post, callback) {
   chrome.storage.local.get({ aiMemory: { learnedRules: [], learningEvents: [] } }, (items) => {
     const memory = items.aiMemory || {};
-    const existingEvents = Array.isArray(memory.learningEvents) ? memory.learningEvents.slice() : [];
-    const event = buildLearningEvent(post, {
-      status: post.performanceStatus,
-      ratio: post.deviationRatio
-    });
-    const learningEvents = event
-      ? [
-          event,
-          ...existingEvents.filter(item => item.id !== event.id)
-        ].slice(0, 100)
-      : existingEvents.slice(0, 100);
-    const learnedRules = compactLearningEventsIntoRules(learningEvents, memory.learnedRules);
-    if (!event && post.performanceStatus === 'hit') {
-      addLog('Performance was within prediction range; no new deviation rule added.', 'system');
+    const nextMemory = updateAiMemoryWithReviewedPost(memory, post);
+
+    if (post.relativePerformance === 'normal') {
+      addLog('Performance was within normal range; no new deviation rule added.', 'system');
     }
-    const nextMemory = {
-      ...memory,
-      learningEvents,
-      learnedRules,
-      updatedAt: Date.now()
-    };
+
     chrome.storage.local.set({ aiMemory: nextMemory }, () => {
       chrome.storage.local.get({ draftVault: [] }, (res) => {
         renderAiMemory(nextMemory, res.draftVault);
@@ -299,12 +129,12 @@ export function renderVault(vault) {
   const feed = document.getElementById('library-feed');
   feed.textContent = '';
   const displayVault = Array.isArray(vault) ? vault.slice(0, 100).map(normalizePostRecord) : [];
-  
+
   const countEl = document.getElementById('library-count');
   if (countEl) {
     countEl.innerText = `(${displayVault.length})`;
   }
-  
+
   if (Array.isArray(vault) && vault.length > 100 && typeof chrome !== 'undefined' && chrome.storage) {
     chrome.storage.local.set({ draftVault: displayVault });
   }
@@ -312,22 +142,22 @@ export function renderVault(vault) {
   if (displayVault.length === 0) {
     const emptyState = document.createElement('div');
     emptyState.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 120px 20px; color: var(--text-sub); text-align: center;';
-    
+
     const icon = document.createElement('i');
     icon.dataset.lucide = 'package-open';
     icon.style.cssText = 'width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.5;';
     emptyState.appendChild(icon);
-    
+
     const title = document.createElement('div');
     title.style.cssText = 'font-size: 16px; font-weight: 500; margin-bottom: 8px; color: var(--text-main);';
     title.textContent = t('vault_empty_title');
     emptyState.appendChild(title);
-    
+
     const desc = document.createElement('div');
     desc.style.cssText = 'font-size: 14px; opacity: 0.8; line-height: 1.6;';
     desc.textContent = t('vault_empty_desc');
     emptyState.appendChild(desc);
-    
+
     feed.appendChild(emptyState);
     if (window.lucide) window.lucide.createIcons();
     return;
@@ -337,13 +167,13 @@ export function renderVault(vault) {
   displayVault.forEach((item, index) => {
     const div = document.createElement('div');
     div.className = 'vault-card';
-    
+
     const date = new Date(item.savedAt || Date.now());
     const lang = getCurrentLang();
-    const dateStr = lang === 'en' 
+    const dateStr = lang === 'en'
       ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
       : date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-    
+
     let titleText = item.text.split('\n')[0].substring(0, 40);
     if (titleText.length === 40) titleText += '...';
 
@@ -351,24 +181,22 @@ export function renderVault(vault) {
     const mainDiv = document.createElement('div');
     mainDiv.className = 'vault-card-main';
     mainDiv.id = `vault-card-main-${index}`;
-    
+
     const titleDiv = document.createElement('div');
     titleDiv.className = 'vault-card-title';
     titleDiv.textContent = titleText;
     mainDiv.appendChild(titleDiv);
-    
+
     const textarea = document.createElement('textarea');
     textarea.className = 'vault-card-textarea';
     textarea.id = `vault-text-${index}`;
     textarea.value = item.text;
     mainDiv.appendChild(textarea);
-    
+
     div.appendChild(mainDiv);
 
-    const prediction = inferPrediction(item);
     const actualViews = Number(item.actualViews) || 0;
     const isReviewed = actualViews > 0;
-    const deviation = actualViews > 0 ? getDeviation(prediction, actualViews) : null;
 
     const performanceDiv = document.createElement('div');
     performanceDiv.className = 'vault-performance';
@@ -376,15 +204,13 @@ export function renderVault(vault) {
     const performanceTop = document.createElement('div');
     performanceTop.className = 'vault-performance-top';
 
-    const predictionDiv = document.createElement('div');
-    predictionDiv.className = 'vault-performance-metric';
-    predictionDiv.innerHTML = `<span>Prediction</span><strong>${formatViews(prediction.minViews)}-${formatViews(prediction.maxViews)}</strong>`;
-    performanceTop.appendChild(predictionDiv);
+    const metricsDiv = document.createElement('div');
+    metricsDiv.className = 'vault-performance-metrics';
 
     const actualDiv = document.createElement('div');
     actualDiv.className = 'vault-performance-metric vault-performance-actual';
     const actualLabel = document.createElement('span');
-    actualLabel.textContent = 'Actual';
+    actualLabel.textContent = 'Views';
     actualDiv.appendChild(actualLabel);
     const actualValueRow = document.createElement('div');
     actualValueRow.className = 'vault-performance-value-row';
@@ -395,7 +221,7 @@ export function renderVault(vault) {
       const editActualBtn = document.createElement('button');
       editActualBtn.className = 'vault-performance-edit-btn';
       editActualBtn.dataset.index = index;
-      editActualBtn.title = 'Edit actual views';
+      editActualBtn.title = 'Edit views';
       const editIcon = document.createElement('i');
       editIcon.dataset.lucide = 'pencil';
       editIcon.setAttribute('width', '13');
@@ -404,18 +230,49 @@ export function renderVault(vault) {
       actualValueRow.appendChild(editActualBtn);
     }
     actualDiv.appendChild(actualValueRow);
-    performanceTop.appendChild(actualDiv);
+    metricsDiv.appendChild(actualDiv);
 
-    const badge = document.createElement('div');
-    badge.className = `vault-performance-badge ${deviation ? deviation.status : 'pending'}`;
-    badge.textContent = deviation ? deviation.label : 'Pending';
-    performanceTop.appendChild(badge);
+    if (isReviewed && item.relativePerformance) {
+      const badgeDiv = document.createElement('div');
+      badgeDiv.className = 'vault-performance-metric';
+      const badgeLabel = document.createElement('span');
+      badgeLabel.textContent = 'Performance';
+      badgeDiv.appendChild(badgeLabel);
+
+      let badgeClass = 'perf-stable';
+      let label = 'Stable';
+      if (item.relativePerformance === 'top_decile' || item.relativePerformance === 'breakout') {
+        badgeClass = 'perf-worked';
+        label = 'Worked';
+      } else if (item.relativePerformance === 'below_baseline') {
+        badgeClass = 'perf-weak';
+        label = 'Weak';
+      }
+      const badge = document.createElement('div');
+      badge.className = `vault-performance-badge ${badgeClass}`;
+      badge.textContent = label;
+      badge.style.marginTop = '4px';
+      badge.style.display = 'inline-block';
+      badgeDiv.appendChild(badge);
+      metricsDiv.appendChild(badgeDiv);
+    } else if (!isReviewed) {
+      const badgeDiv = document.createElement('div');
+      badgeDiv.className = 'vault-performance-metric';
+      const badgeLabel = document.createElement('span');
+      badgeLabel.textContent = 'Status';
+      badgeDiv.appendChild(badgeLabel);
+
+      const badge = document.createElement('div');
+      badge.className = 'vault-performance-badge pending';
+      badge.textContent = 'Pending Review';
+      badge.style.marginTop = '4px';
+      badge.style.display = 'inline-block';
+      badgeDiv.appendChild(badge);
+      metricsDiv.appendChild(badgeDiv);
+    }
+
+    performanceTop.appendChild(metricsDiv);
     performanceDiv.appendChild(performanceTop);
-
-    const reason = document.createElement('div');
-    reason.className = 'vault-performance-reason';
-    reason.textContent = prediction.reason;
-    performanceDiv.appendChild(reason);
 
     const controls = document.createElement('div');
     controls.className = 'vault-performance-controls';
@@ -435,26 +292,19 @@ export function renderVault(vault) {
     controls.appendChild(savePerfBtn);
     performanceDiv.appendChild(controls);
 
-    if (deviation) {
-      const result = document.createElement('div');
-      result.className = 'vault-performance-result';
-      result.textContent = `Result: ${deviation.detail}`;
-      performanceDiv.appendChild(result);
-    }
-
     if (item.aiLearning) {
       const learning = document.createElement('div');
       learning.className = 'vault-performance-learning';
-      learning.textContent = `AI learned: ${item.aiLearning}`;
+      learning.textContent = item.aiLearning;
       performanceDiv.appendChild(learning);
     }
 
     div.appendChild(performanceDiv);
-    
+
     // Footer
     const footerDiv = document.createElement('div');
     footerDiv.className = 'vault-card-footer';
-    
+
     const dateDiv = document.createElement('div');
     dateDiv.className = 'vault-card-date';
     const dateIconSpan = document.createElement('span');
@@ -467,7 +317,7 @@ export function renderVault(vault) {
     dateDiv.appendChild(dateIconSpan);
     dateDiv.appendChild(document.createTextNode(' ' + dateStr));
     footerDiv.appendChild(dateDiv);
-    
+
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'vault-card-actions';
 
@@ -482,7 +332,7 @@ export function renderVault(vault) {
     deleteBtn.appendChild(deleteIcon);
     deleteBtn.appendChild(document.createTextNode(' ' + t('vault_delete')));
     actionsDiv.appendChild(deleteBtn);
-    
+
     const injectBtn = document.createElement('button');
     injectBtn.className = 'vault-action-btn inject-btn vault-inject-btn';
     injectBtn.dataset.index = index;
@@ -494,11 +344,11 @@ export function renderVault(vault) {
     injectBtn.appendChild(injectIcon);
     injectBtn.appendChild(document.createTextNode(' ' + t('vault_copy')));
     actionsDiv.appendChild(injectBtn);
-    
+
     footerDiv.appendChild(actionsDiv);
     div.appendChild(footerDiv);
     frag.appendChild(div);
-    
+
     // Expandable Logic
     mainDiv.addEventListener('click', (e) => {
       if (e.target === textarea && div.classList.contains('expanded')) return;
@@ -508,10 +358,10 @@ export function renderVault(vault) {
         textarea.style.height = 'auto';
         textarea.style.height = textarea.scrollHeight + 'px';
       } else {
-        textarea.style.height = '60px'; 
+        textarea.style.height = '60px';
       }
     });
-    
+
     // Auto-resize
     textarea.addEventListener('input', () => {
       if (div.classList.contains('expanded')) {
@@ -519,7 +369,7 @@ export function renderVault(vault) {
         textarea.style.height = textarea.scrollHeight + 'px';
       }
     });
-    
+
     // Auto-save
     textarea.addEventListener('blur', () => {
       const newText = textarea.value.trim();
@@ -545,21 +395,21 @@ export function renderVault(vault) {
       }
     });
   });
-  
+
   feed.appendChild(frag);
-  
+
   // Bind inject buttons
   document.querySelectorAll('.vault-inject-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const idx = btn.getAttribute('data-index');
       const textToInject = document.getElementById(`vault-text-${idx}`).value;
-      
+
       chrome.storage.local.get({ draftVault: [] }, (items) => {
         const vaultItem = items.draftVault[idx];
         if (vaultItem && vaultItem.originalAIOutput) {
           if (textToInject.trim() !== vaultItem.originalAIOutput.trim()) {
             recordFeedbackLoop(vaultItem.originalAIOutput, textToInject, { data: { text: vaultItem.source }});
-            
+
             // update vault to new value so it doesn't keep triggering if they click inject again without edits
             vaultItem.text = textToInject;
             vaultItem.originalAIOutput = textToInject;
@@ -567,7 +417,7 @@ export function renderVault(vault) {
           }
         }
       });
-      
+
       if (textToInject) {
         navigator.clipboard.writeText(textToInject).then(() => {
           showToast(t('toast_copied'), 'system');
@@ -575,7 +425,7 @@ export function renderVault(vault) {
           addLog('复制失败: ' + err.message, 'error');
         });
       }
-      
+
       const oldText = btn.textContent;
       btn.textContent = '';
       const checkIcon = document.createElement('i');
@@ -613,21 +463,19 @@ export function renderVault(vault) {
         const post = currentVault[idx];
         if (!post) return;
 
-        const prediction = inferPrediction(post);
-        const deviation = getDeviation(prediction, actualViews);
-        const updatedPost = {
-          ...post,
-          prediction,
-          actualViews,
-          deviationRatio: deviation.ratio,
-          performanceStatus: deviation.status,
-          status: POST_STATUS.REVIEWED,
-          aiLearning: buildLearning({ ...post, prediction }, deviation),
-          reviewedAt: Date.now()
-        };
-        currentVault[idx] = normalizePostRecord(updatedPost);
+
+        const metricsObj = { ...getPerformanceMetrics(post), views: actualViews };
+        const reviewResult = applyPerformanceReview(post, metricsObj, currentVault);
+        if (reviewResult && reviewResult.post) {
+          currentVault[idx] = reviewResult.post;
+          updatedPost = reviewResult.post;
+        } else {
+          showToast('Failed to review post', 'error');
+          return;
+        }
 
         chrome.storage.local.set({ draftVault: currentVault }, () => {
+          let updatedPost = currentVault[idx];
           updateAiMemoryWithLearning(updatedPost, () => {
             addLog('Performance feedback saved. AI memory updated.', 'system');
             showToast('Performance saved', 'system');

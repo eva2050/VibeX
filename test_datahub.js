@@ -1,4 +1,4 @@
-const DATAHUB_API_KEY = "zUBzC9YgT9f8VLrh";
+const DATAHUB_API_KEY = process.env.DATAHUB_API_KEY || '';
 const urls = [
   "https://zhuanlan.zhihu.com/p/698889953",
   "https://mp.weixin.qq.com/s/9nQO0yU9J_W3m1sF4V0Gqg",
@@ -22,6 +22,10 @@ async function testUrl(url) {
 }
 
 async function run() {
+  if (!DATAHUB_API_KEY) {
+    console.error('Set DATAHUB_API_KEY before running this script.');
+    return;
+  }
   for (const url of urls) {
     await testUrl(url);
   }

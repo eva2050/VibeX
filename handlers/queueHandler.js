@@ -1,19 +1,32 @@
 import { formatTweetForX } from '../utils/textUtils.js';
 import { addLog } from '../core/state.js';
 import { REPLY_RETRY_LOCK_MS } from '../core/constants.js';
+import '../core/automationState.js';
+
+const { EVENTS: REPLY_FLOW_EVENTS, buildReplyFlowTransition, hasActiveReplyFlow, REPLY_FLOW_STORAGE_KEYS } = globalThis.VibeXAutomationState;
 
 export function handleQueueMessage(request, sender, sendResponse, context) {
   if (request.action === "queueUpdated") {
     context.checkAndSetupAlarm();
+    sendResponse({ success: true });
+    return false;
   } else if (request.action === "testPostNow") {
     const text = formatTweetForX(request.text || '');
     if (!text) {
       sendResponse({ success: false, error: '测试发帖内容为空' });
       return false;
     }
-    chrome.storage.local.get(['pendingPost'], (existing) => {
+    chrome.storage.local.get(['pendingPost', ...REPLY_FLOW_STORAGE_KEYS], (existing) => {
       if (existing.pendingPost) {
         sendResponse({ success: false, error: '已有待发送推文，请先处理完成或停止自动化后再测试' });
+        return;
+      }
+      // Manual "test post" shares the same X tab/DOM as the auto-reply flow.
+      // Reuse the same reply-flow-busy guard that background.js#executeNextPost
+      // already applies to scheduled posts, so a manual test can't collide
+      // with an in-flight auto-reply the way scheduled posts could before.
+      if (hasActiveReplyFlow(existing)) {
+        sendResponse({ success: false, error: '检测到自动回复正在进行中，请稍后再测试发帖，避免和回复流程冲突' });
         return;
       }
       chrome.storage.local.set({
@@ -21,23 +34,34 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
         pendingPostId: null,
         pendingPostSource: 'manualTest',
         pendingScheduledAt: null,
+        isPosting: false,
         isAutoPaused: false,
         pauseReason: ''
       }, () => {
-        addLog('info', '收到手动测试发帖请求');
+        addLog('info', 'manual_test_post_request');
         context.triggerPostInTab();
         sendResponse({ success: true });
       });
     });
     return true;
   } else if (request.action === "postCompleted") {
-    context.handlePostCompleted(request.source || 'queue');
-    sendResponse({ success: true });
+    Promise.resolve(context.handlePostCompleted(request.source || 'queue', {
+      postUrl: request.postUrl || '',
+      statusId: request.statusId || ''
+    }))
+      .then(() => sendResponse({ success: true }))
+      .catch(error => {
+        addLog('error', 'post_failed', [error.message || String(error)]);
+        sendResponse({ success: false, error: error.message || String(error) });
+      });
+    return true;
   } else if (request.action === "postFailed") {
     const reason = request.reason || '发帖失败，请人工检查';
-    addLog('error', reason);
-    chrome.storage.local.set({ isAutoPaused: true, pauseReason: reason });
-    sendResponse({ success: true });
+    addLog('error', 'post_failed', [reason]);
+    chrome.storage.local.set({ isAutoPaused: true, pauseReason: reason, isPosting: false }, () => {
+      sendResponse({ success: true });
+    });
+    return true;
   } else if (request.action === "replyCompleted") {
     const author = request.tweetAuthor || '未知用户';
     const replyText = request.replyText || '';
@@ -78,6 +102,8 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
       
       const twitterCooldownUntil = Date.now() + nextCooldownMs;
       
+      const replyFlowDone = buildReplyFlowTransition(res, REPLY_FLOW_EVENTS.REPLY_COMPLETED).update;
+
       chrome.storage.local.set({
         stats,
         sessionReplyCount: count,
@@ -85,6 +111,7 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
         lastReplyDate: nowString,
         twitterCooldownUntil,
         recentRepliedAuthors: recentAuthors,
+        ...replyFlowDone,
         lastReplySent: {
           tweetAuthor: author,
           replyText,
@@ -92,23 +119,26 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
         }
       }, () => {
         const cdMins = Math.round(nextCooldownMs / 60000);
-        const burstPrefix = (res.onboardingStrategy?.automationMode === 'autoReply' && count <= 5) ? `[爆发期 第${count}条] ` : '';
-        addLog('success', `确认已回复 @${author}，${burstPrefix}进入 ${cdMins} 分钟互动冷却`);
+        addLog('success', 'reply_confirmed', [author, cdMins]);
         sendResponse({ success: true });
       });
     });
     return true;
   } else if (request.action === "replyFailed") {
     const reason = request.reason || '回复未完成，请检查 X 弹窗状态';
-    addLog('warn', reason);
+    addLog('warn', 'reply_failed', [reason]);
+    const replyFlowFailed = buildReplyFlowTransition({}, REPLY_FLOW_EVENTS.REPLY_FAILED, { reason }).update;
     chrome.storage.local.set({
+      ...replyFlowFailed,
       twitterCooldownUntil: Date.now() + REPLY_RETRY_LOCK_MS,
       lastReplyFailure: {
         reason,
         time: Date.now()
       }
+    }, () => {
+      sendResponse({ success: true });
     });
-    sendResponse({ success: true });
+    return true;
   }
   return false;
 }

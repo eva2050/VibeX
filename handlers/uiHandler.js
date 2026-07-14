@@ -1,20 +1,55 @@
 import { addLog } from '../core/state.js';
 
+const MAX_INSPIRATION_LIBRARY_ITEMS = 500;
+
 export function handleUiMessage(request, sender, sendResponse, context) {
   if (request.action === "extractBio" || request.action === "openProfileTab") {
     const rawUrl = request.url || request.profileUrl || request.profilePath || '';
     const profileUrl = rawUrl.startsWith('http') ? rawUrl : `https://x.com${rawUrl}`;
-    addLog('info', `后台打开 Profile 页面: ${profileUrl}`);
+    addLog('info', 'profile_tab_opened', [profileUrl]);
     chrome.tabs.create({ url: profileUrl, active: false }, (tab) => {
-      chrome.storage.onChanged.addListener(function listener(changes, namespace) {
-        if (namespace === 'local' && changes.accountBio) {
-          addLog('success', 'Profile 页面读取完成，关闭后台标签页');
-          chrome.tabs.remove(tab.id);
-          chrome.storage.onChanged.removeListener(listener);
-        }
-      });
+      const createError = chrome.runtime.lastError;
+      if (createError || !tab?.id) {
+        sendResponse({ success: false, error: createError?.message || 'Profile tab open failed' });
+        return;
+      }
+
+      let settled = false;
+      let timeoutId = 0;
+      const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        chrome.tabs.remove(tab.id, () => {
+          void chrome.runtime.lastError;
+        });
+      };
+      const finish = (payload) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        sendResponse(payload);
+      };
+      const readSnapshot = () => {
+        chrome.tabs.sendMessage(tab.id, { action: 'readProfileSnapshot' }, (response) => {
+          if (chrome.runtime.lastError || !response?.success) return;
+          const bio = String(response.bio || '').trim();
+          if (!bio) return;
+          addLog('success', 'profile_read_complete');
+          finish({ success: true, bio });
+        });
+      };
+      const onUpdated = (tabId, changeInfo) => {
+        if (tabId === tab.id && changeInfo.status === 'complete') readSnapshot();
+      };
+
+      timeoutId = setTimeout(() => {
+        addLog('warn', 'profile_read_timeout');
+        finish({ success: false, error: 'Bio 提取超时' });
+      }, 30000);
+      chrome.tabs.onUpdated.addListener(onUpdated);
+      if (tab.status === 'complete') readSnapshot();
     });
-    return true; // async but not keeping channel open for response to sender
+    return true;
   } else if (request.action === "collectTweet") {
     chrome.storage.local.get(['inspirationLibrary'], (res) => {
       const list = res.inspirationLibrary || [];
@@ -37,9 +72,10 @@ export function handleUiMessage(request, sender, sendResponse, context) {
       };
       
       list.unshift(newItem);
+      if (list.length > MAX_INSPIRATION_LIBRARY_ITEMS) list.length = MAX_INSPIRATION_LIBRARY_ITEMS;
       
       chrome.storage.local.set({ inspirationLibrary: list }, () => {
-        addLog('success', `成功收录推文 (作者: @${request.tweet.author}) 到灵感库`);
+        addLog('success', 'tweet_collected', [request.tweet.author]);
         
         if (chrome.sidePanel && chrome.sidePanel.open && sender && sender.tab && sender.tab.windowId) {
           chrome.sidePanel.open({ windowId: sender.tab.windowId }).catch(console.error);
@@ -54,7 +90,7 @@ export function handleUiMessage(request, sender, sendResponse, context) {
       const list = res.inspirationLibrary || [];
       const updated = list.filter(t => t.id !== request.id);
       chrome.storage.local.set({ inspirationLibrary: updated }, () => {
-        addLog('info', '从灵感库中删除了一条推文');
+        addLog('info', 'collected_tweet_deleted');
         sendResponse({ success: true });
       });
     });
@@ -81,6 +117,16 @@ export function handleUiMessage(request, sender, sendResponse, context) {
     }
     chrome.storage.local.set({ pendingAutoReply: request.tweetData });
     sendResponse({ success: true });
+    return true;
+  } else if (request.action === 'toggleBot') {
+    const isRunning = Boolean(request.state);
+    chrome.storage.local.set({
+      isRunning,
+      isAutoPaused: !isRunning,
+      pauseReason: ''
+    }, () => {
+      sendResponse({ success: true, isRunning });
+    });
     return true;
   }
   return false;

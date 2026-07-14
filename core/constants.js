@@ -6,6 +6,12 @@ const REPLY_COOLDOWN_MS = 5 * 60 * 1000;
 
 const REPLY_RETRY_LOCK_MS = 60 * 1000;
 
+const DEFAULT_X_CLIENT_ID = 'bDZmWnRPUW8zLXVaNmh1ZVVwdHA6MTpjaQ';
+
+function normalizeXClientId(clientId = '') {
+  return String(clientId || '').trim() || DEFAULT_X_CLIENT_ID;
+}
+
 
 
 const DEFAULT_AGENT_MEMORY = {
@@ -138,7 +144,46 @@ const DEFAULT_DISCOVERY_KEYWORDS = {
 };
 
 function selectGrowthPlaybook(context = {}) {
-  return GROWTH_PLAYBOOKS.indie_builder;
+  const explicit = context.id
+    || context.strategyArchetype
+    || context.onboardingStrategy?.strategyArchetype;
+  if (GROWTH_PLAYBOOKS[explicit]) return GROWTH_PLAYBOOKS[explicit];
+
+  const signal = [
+    context.sourceInput,
+    context.accountBio,
+    context.leadTarget,
+    context.onboardingStrategy?.sourceInput,
+    context.onboardingStrategy?.growthGoal,
+    context.persona?.targetUsers,
+    context.persona?.characteristics,
+    context.persona?.goals,
+    context.aiPersona?.targetUsers,
+    context.aiPersona?.characteristics,
+    context.aiPersona?.goals,
+    context.agentMemory?.identity,
+    context.agentMemory?.marketPosition,
+    context.agentMemory?.audienceSegments,
+    context.agentMemory?.audiencePains,
+    context.agentMemory?.contentPillars,
+    context.agentMemory?.contentAngles,
+    context.agentMemory?.coreOpinions,
+    context.agentMemory?.sourceInputs
+  ].filter(Boolean).join('\n').toLowerCase();
+
+  let best = GROWTH_PLAYBOOKS.indie_builder;
+  let bestScore = -1;
+  Object.values(GROWTH_PLAYBOOKS).forEach((playbook) => {
+    const score = playbook.triggers.reduce((sum, trigger) => {
+      return signal.includes(String(trigger).toLowerCase()) ? sum + 1 : sum;
+    }, 0);
+    if (score > bestScore) {
+      best = playbook;
+      bestScore = score;
+    }
+  });
+
+  return bestScore > 0 ? best : GROWTH_PLAYBOOKS.indie_builder;
 }
 
-export { FIRST_AUTO_POST_DELAY_MS, REPLY_COOLDOWN_MS, REPLY_RETRY_LOCK_MS, DEFAULT_AGENT_MEMORY, AGENT_MEMORY_LABELS, GROWTH_PLAYBOOKS, DEFAULT_INTERACTION_TARGETS, PROJECT_ACCOUNT_HANDLES, DEFAULT_DISCOVERY_KEYWORDS, selectGrowthPlaybook };
+export { FIRST_AUTO_POST_DELAY_MS, REPLY_COOLDOWN_MS, REPLY_RETRY_LOCK_MS, DEFAULT_X_CLIENT_ID, normalizeXClientId, DEFAULT_AGENT_MEMORY, AGENT_MEMORY_LABELS, GROWTH_PLAYBOOKS, DEFAULT_INTERACTION_TARGETS, PROJECT_ACCOUNT_HANDLES, DEFAULT_DISCOVERY_KEYWORDS, selectGrowthPlaybook };

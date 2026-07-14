@@ -2,15 +2,23 @@
 (function() {
 'use strict';
 
-console.log("X Auto Bot: Automator loaded on X.com");
+console.log("VibeX: Automator loaded on X.com");
 
 const MAX_LOGS = 50;
+const POSTING_LOCK_TTL_MS = 20 * 1000;
 let isAutomatorBusy = false;
 let consecutiveFailures = 0;
+let pendingPostRetryTimer = null;
+const ReplyFlowState = window.VibeXAutomationState;
+const ReplyFlowEvents = ReplyFlowState.EVENTS;
 
-function checkAndPause() {
+function isFreshPostingLock(state = {}, now = Date.now()) {
+  return Boolean(state.isPosting && now - Number(state.isPostingStartedAt || 0) < POSTING_LOCK_TTL_MS);
+}
+
+function checkAndPause(pauseFn = pauseAutomation) {
   if (consecutiveFailures >= 2) {
-    pauseAutomation(`连续 ${consecutiveFailures} 次操作失败，请检查当前页面状态后手动点击继续`);
+    pauseFn(`连续 ${consecutiveFailures} 次操作失败，请检查当前页面状态后手动点击继续`);
   }
 }
 
@@ -18,7 +26,9 @@ function pauseAutomation(reason) {
   addLog('error', reason);
   chrome.storage.local.set({
     isAutoPaused: true,
-    pauseReason: reason
+    pauseReason: reason,
+    isPosting: false,
+    isPostingStartedAt: 0
   });
   try {
     const result = chrome.runtime.sendMessage({ action: 'postFailed', reason });
@@ -26,6 +36,15 @@ function pauseAutomation(reason) {
   } catch (e) {
     // Extension context may be gone during reload; local pause state is already written.
   }
+}
+
+function pauseReplyAutomation(reason) {
+  addLog('error', reason);
+  chrome.storage.local.set({
+    isAutoPaused: true,
+    pauseReason: reason
+  });
+  notifyReplyFailed(reason);
 }
 
 function safeRuntimeMessage(message) {
@@ -55,10 +74,14 @@ function runtimeMessage(message) {
 }
 
 function notifyReplyFailed(reason) {
+  applyReplyFlowEvent(ReplyFlowEvents.REPLY_FAILED, { reason });
+  notifyReplyFlowStateVisible();
   safeRuntimeMessage({ action: 'replyFailed', reason });
 }
 
 function notifyReplyCompleted(tweetAuthor, tweetContent, replyText) {
+  applyReplyFlowEvent(ReplyFlowEvents.REPLY_COMPLETED);
+  notifyReplyFlowStateVisible();
   safeRuntimeMessage({
     action: 'replyCompleted',
     tweetAuthor,
@@ -67,13 +90,44 @@ function notifyReplyCompleted(tweetAuthor, tweetContent, replyText) {
   });
 }
 
-function notifyPostCompleted(source) {
-  chrome.runtime.sendMessage({
-    action: 'postCompleted',
-    source: source || 'queue'
-  }, () => {
-    if (chrome.runtime.lastError) {
-      chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
+function applyReplyFlowEvent(event, payload = {}, extra = {}, callback) {
+  ReplyFlowState.applyReplyFlowEvent(chrome.storage.local, event, payload, extra, callback);
+}
+
+function notifyReplyFlowStateVisible() {
+  window.dispatchEvent(new CustomEvent('xAutoBot_ReplyFlowStateVisible'));
+}
+
+function notifyPostCompleted(source, meta = {}) {
+  chrome.storage.local.set({ isPosting: false, isPostingStartedAt: 0 });
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({
+      action: 'postCompleted',
+      source: source || 'queue',
+      postUrl: meta.postUrl || '',
+      statusId: meta.statusId || ''
+    }, () => {
+      if (chrome.runtime.lastError) {
+        chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
+      }
+      resolve();
+    });
+  });
+}
+
+function schedulePendingPostRetry(reason = '等待当前操作完成后重试发帖', delay = 3000) {
+  if (pendingPostRetryTimer) return;
+  addLog('info', reason);
+  pendingPostRetryTimer = setTimeout(() => {
+    pendingPostRetryTimer = null;
+    handlePendingPost();
+  }, delay);
+}
+
+function resumePendingPostIfAny(delay = 1500) {
+  chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'isRunning'], (res) => {
+    if (res.pendingPost && (res.isRunning || res.pendingPostSource === 'manualTest')) {
+      schedulePendingPostRetry('检测到待发推文，当前操作结束后继续发帖', delay);
     }
   });
 }
@@ -134,6 +188,22 @@ function getTweetStatusIdFromNode(tweetNode) {
   return getStatusIdFromHref(link?.getAttribute('href') || '');
 }
 
+function getLatestVisibleStatusMeta() {
+  const links = Array.from(document.querySelectorAll('a[href*="/status/"]'))
+    .filter(isVisibleElement)
+    .map(link => {
+      const href = link.getAttribute('href') || '';
+      const statusId = getStatusIdFromHref(href);
+      if (!statusId) return null;
+      const url = href.startsWith('http') ? href : `https://x.com${href}`;
+      const rect = link.getBoundingClientRect();
+      return { url, statusId, top: rect.top };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Math.abs(a.top) - Math.abs(b.top));
+  return links[0] || { url: '', statusId: '' };
+}
+
 function normalizeText(text) {
   return (text || '')
     .replace(/\u00a0/g, ' ')
@@ -143,6 +213,41 @@ function normalizeText(text) {
     .filter(Boolean)
     .join('\n')
     .trim();
+}
+
+function normalizeComparableText(text) {
+  return normalizeText(text)
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+function hasSubstantialTextMatch(actualText, expectedText) {
+  const actual = normalizeText(actualText);
+  const expected = normalizeText(expectedText);
+  if (!actual || !expected) return false;
+  if (actual === expected) return true;
+
+  const actualCompact = normalizeComparableText(actual);
+  const expectedCompact = normalizeComparableText(expected);
+  if (!actualCompact || !expectedCompact) return false;
+  if (actualCompact === expectedCompact) return true;
+
+  const shortestMeaningfulLength = Math.min(60, Math.max(20, Math.floor(expectedCompact.length * 0.35)));
+  if (actualCompact.length >= shortestMeaningfulLength && expectedCompact.includes(actualCompact)) return true;
+  if (actualCompact.includes(expectedCompact.slice(0, shortestMeaningfulLength))) return true;
+
+  const expectedTokens = expected
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(token => token.length > 2)
+    .slice(0, 12);
+  if (expectedTokens.length >= 4) {
+    const actualLower = actual.toLowerCase();
+    const hitCount = expectedTokens.filter(token => actualLower.includes(token)).length;
+    return hitCount / expectedTokens.length >= 0.7;
+  }
+
+  return false;
 }
 
 function getEditorText(element) {
@@ -163,6 +268,28 @@ function findTweetEditor(scope) {
     const label = `${element.getAttribute('aria-label') || ''} ${element.closest('[data-testid="tweetTextarea_0"]') ? 'tweetTextarea' : ''}`;
     return /tweet|post|reply|回复|发帖|发布|tweetTextarea/i.test(label);
   }) || candidates[0] || null;
+}
+
+function getIntentComposerDiagnostics() {
+  const editorCandidates = Array.from(document.querySelectorAll('[contenteditable="true"], [role="textbox"]'))
+    .filter(isVisibleElement);
+  const buttons = Array.from(document.querySelectorAll('button, [role="button"]'))
+    .filter(isVisibleElement)
+    .map(button => `${button.innerText || ''} ${button.getAttribute('aria-label') || ''}`.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  const pageText = normalizeText([
+    document.querySelector('main')?.innerText || '',
+    document.querySelector('#layers')?.innerText || '',
+    getToastOrAlertText()
+  ].filter(Boolean).join('\n')).slice(0, 180);
+  return [
+    `url=${window.location.pathname}${window.location.search ? '?...' : ''}`,
+    `editors=${editorCandidates.length}`,
+    `loggedOutOrBlocked=${isLoggedOutOrBlocked()}`,
+    buttons.length ? `buttons=${buttons.join(' | ').slice(0, 140)}` : '',
+    pageText ? `page=${pageText}` : ''
+  ].filter(Boolean).join(' ; ');
 }
 
 function findActiveDialog() {
@@ -286,10 +413,13 @@ async function closeOpenComposerBeforeNavigation(reason = '页面跳转') {
   if (!dialog && !editor) return true;
 
   const textBeforeClose = getEditorText(editor);
+  const sendButton = dialog ? findSendButton(dialog) : findSendButton(document);
+  const hasRealDraft = Boolean(textBeforeClose)
+    || Boolean(sendButton && !sendButton.disabled && sendButton.getAttribute('aria-disabled') !== 'true');
+  if (!hasRealDraft) return true;
+
   const closeButton = dialog ? findCloseDialogButton(dialog) : findCloseDialogButton(document);
-  if (!closeButton) {
-    return !textBeforeClose;
-  }
+  if (!closeButton) return false;
 
   addLog('info', `${reason} 前检测到未发送编辑器，先关闭并丢弃当前草稿`);
   simulateRealClick(closeButton);
@@ -304,6 +434,139 @@ async function closeOpenComposerBeforeNavigation(reason = '页面跳转') {
   const remainingEditor = findTweetEditor(document);
   const remainingText = getEditorText(remainingEditor);
   return !remainingEditor || !remainingText;
+}
+
+async function settleComposerAfterSuccessfulSend(expectedText = '', reason = '发送成功后清理编辑器残留') {
+  const expected = normalizeText(expectedText);
+  for (let i = 0; i < 12; i += 1) {
+    const dialog = findActiveDialog();
+    const editor = findTweetEditor(dialog || document);
+    if (!dialog && !editor) return true;
+    await sleep(500);
+  }
+
+  const dialog = findActiveDialog();
+  const editor = findTweetEditor(dialog || document);
+  const editorText = getEditorText(editor);
+  if (!dialog && !editor) return true;
+  if (editorText && expected && !hasSubstantialTextMatch(editorText, expected)) {
+    addLog('warn', `${reason}：检测到不同编辑器内容，保留不自动关闭`);
+    return false;
+  }
+
+  const closeButton = dialog ? findCloseDialogButton(dialog) : findCloseDialogButton(document);
+  if (!closeButton) {
+    addLog('warn', `${reason}：未找到关闭按钮，保留页面状态`);
+    return false;
+  }
+
+  addLog('info', `${reason}：关闭 X 残留编辑器`);
+  simulateRealClick(closeButton);
+  await sleep(800);
+
+  const discardButton = await waitForElement(() => findDiscardDraftButton(document), editorText ? 2500 : 800, 250);
+  if (discardButton) {
+    simulateRealClick(discardButton);
+    await sleep(800);
+  }
+
+  const remainingEditor = findTweetEditor(document);
+  const remainingText = getEditorText(remainingEditor);
+  return !remainingEditor || !remainingText;
+}
+
+async function leaveIntentPostPageAfterSuccess() {
+  if (!/\/intent\/(post|tweet)/.test(window.location.pathname) || window.location.search.includes('in_reply_to')) return;
+  await new Promise(resolve => chrome.storage.local.set({ botNavigationTime: Date.now() }, resolve));
+  window.location.assign('https://x.com/home');
+}
+
+async function clickPostSendAndWait(expectedText, isManualTest) {
+  const postDialog = findActiveDialog() || document.querySelector('div[role="dialog"]');
+  let sendBtn = postDialog ? findSendButton(postDialog) : findSendButton(document);
+  if (!sendBtn) {
+    sendBtn = await waitForElement(() => {
+      const dialog = document.querySelector('div[role="dialog"]');
+      return dialog ? findSendButton(dialog) : findSendButton(document);
+    }, 5000);
+  }
+
+  if (!sendBtn) {
+    consecutiveFailures++;
+    addLog('error', `未找到发推按钮 (连续失败 ${consecutiveFailures} 次)`);
+    checkAndPause();
+    return null;
+  }
+
+  sendBtn = await waitForEnabledButton(() => {
+    const dialog = document.querySelector('div[role="dialog"]');
+    return dialog ? findSendButton(dialog) : findSendButton(document);
+  }, 10000);
+
+  if (!sendBtn) {
+    consecutiveFailures++;
+    addLog('error', `发推按钮未自然启用，取消发推 (连续失败 ${consecutiveFailures} 次)`);
+    checkAndPause();
+    return null;
+  }
+
+  const clickResult = await clickElementReliably(sendBtn, '发推按钮');
+  let outcome = await waitForIntentSendOutcome(expectedText, 10000);
+
+  if (outcome.status === 'pending' && clickResult?.blockedByOverlay) {
+    // The click point was intercepted by something we don't recognize (unknown popup, phone
+    // verification, sensitive-content confirm, etc). Retrying the exact same click is unlikely
+    // to help and may interact with the wrong element, so skip the blind retry and surface the
+    // overlay snapshot instead so it's diagnosable from logs.
+    outcome.reason = `${outcome.reason}；发送按钮点击疑似被未知弹窗遮挡（${describeBlockingOverlay(clickResult.overlaySnapshot)}），已跳过盲目重试`;
+  } else if (outcome.status === 'pending') {
+    const dialog = findActiveDialog();
+    const editor = findTweetEditor(dialog || document);
+    const retryButton = await waitForEnabledButton(() => {
+      const activeDialog = findActiveDialog();
+      return activeDialog ? findSendButton(activeDialog) : findSendButton(document);
+    }, 2000);
+
+    if (retryButton && hasSubstantialTextMatch(getEditorText(editor), expectedText)) {
+      addLog('warn', '首次点击发推后未检测到发送结果，重试一次真实鼠标点击');
+      const retryClickResult = await clickElementReliably(retryButton, '发推按钮重试');
+      outcome = await waitForIntentSendOutcome(expectedText, 18000);
+      if (outcome.status === 'pending' && retryClickResult?.blockedByOverlay) {
+        outcome.reason = `${outcome.reason}；重试点击同样被疑似未知弹窗遮挡（${describeBlockingOverlay(retryClickResult.overlaySnapshot)}）`;
+      }
+    }
+  }
+
+  if (!['success', 'duplicate'].includes(outcome.status)) {
+    consecutiveFailures++;
+    addLog('warn', `发帖未确认成功，已暂停。${outcome.reason} (连续失败 ${consecutiveFailures} 次)`);
+    pauseAutomation(`发帖未确认成功，已暂停。${outcome.reason}`);
+    return null;
+  }
+
+  consecutiveFailures = 0;
+  addLog('success', outcome.status === 'duplicate'
+    ? `X 提示这条内容已发布过，已消费当前待发任务：${outcome.reason}`
+    : (isManualTest ? `测试推文发送成功！${outcome.reason}` : `定时推文发送成功！${outcome.reason}`));
+  return outcome;
+}
+
+function findMatchingOpenPostComposer(expectedText) {
+  const expected = normalizeText(expectedText);
+  const editors = [
+    ...new Set(Array.from(document.querySelectorAll(
+      '[data-testid="tweetTextarea_0"] [contenteditable="true"], [data-testid="tweetTextarea_0"][contenteditable="true"], [role="textbox"][contenteditable="true"]'
+    )))
+  ].filter(element => element.isContentEditable && isVisibleElement(element));
+
+  for (const editor of editors) {
+    const text = getEditorText(editor);
+    if (!text || !hasSubstantialTextMatch(text, expected)) continue;
+    const dialog = editor.closest('div[role="dialog"]') || document;
+    if (dialog?.innerText && /replying to|回复给|正在回复/i.test(dialog.innerText)) continue;
+    return { editor, dialog };
+  }
+  return null;
 }
 
 async function safeNavigateTo(url, reason = '页面跳转', options = {}) {
@@ -428,28 +691,40 @@ async function startIntentReplyFlow({ statusId, replyText, tweetAuthor, tweetCon
   if (!statusId) return false;
   addLog('info', `${reason || '开始 X 官方 intent 回复'}，打开官方回复页`);
   const targetUrl = getIntentReplyUrl(statusId, replyText);
-  await setLocalStorage({
-    pendingReply: {
-      statusId,
-      replyText,
-      tweetAuthor,
-      tweetContent,
-      createdAt: Date.now()
-    },
-    isTyping: true,
-    isAutoPaused: false,
-    pauseReason: ''
+  await new Promise(resolve => {
+    applyReplyFlowEvent(ReplyFlowEvents.PENDING_REPLY_CREATED, {
+      pendingReply: {
+        statusId,
+        replyText,
+        tweetAuthor,
+        tweetContent,
+        createdAt: Date.now()
+      }
+    }, {
+      isAutoPaused: false,
+      pauseReason: ''
+    }, (result) => {
+      notifyReplyFlowStateVisible();
+      resolve(result);
+    });
   });
   const navigation = await safeNavigateTo(targetUrl, '打开 X 官方 intent 回复页', {
     openCleanTabOnBlocked: true,
     returnDetails: true
   });
-  if (!navigation.success) return false;
+  if (!navigation.success) {
+    notifyReplyFailed(`未能打开 X 官方 intent 回复页：${reason || '页面跳转失败'}`);
+    return false;
+  }
   if (!navigation.openedCleanTab) {
     setTimeout(() => {
       isAutomatorBusy = false;
       handlePendingReply();
     }, 3500);
+  } else {
+    setTimeout(() => {
+      isAutomatorBusy = false;
+    }, 1000);
   }
   return true;
 }
@@ -542,13 +817,16 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
 
     // Fallback to Intent Flow if Native Flow failed or tweetNode wasn't found
     addLog('warn', '原生回复失败，回退到 Intent 页面模式');
-    await startIntentReplyFlow({
+    const intentStarted = await startIntentReplyFlow({
       statusId,
       replyText,
       tweetAuthor: author,
       tweetContent: originalText,
       reason: `准备通过 X 官方 intent 回复 @${author}`
     });
+    if (!intentStarted) {
+      isAutomatorBusy = false;
+    }
   });
 });
 
@@ -761,6 +1039,46 @@ function simulateRealClick(element) {
   element.click?.();
 }
 
+function findBlockingOverlayAt(x, y, expectedElement) {
+  // Generic fallback for X pop-ups we don't explicitly know about yet (phone verification,
+  // sensitive-content confirm, new throttle dialogs, etc). If the topmost element at the
+  // click point is not the button we intend to click (and not one of its ancestors/descendants),
+  // something else is very likely intercepting the click.
+  let topEl;
+  try {
+    topEl = document.elementFromPoint(x, y);
+  } catch (e) {
+    return null;
+  }
+  if (!topEl) return null;
+  if (topEl === expectedElement) return null;
+  if (expectedElement && (expectedElement.contains?.(topEl) || topEl.contains?.(expectedElement))) return null;
+
+  let node = topEl;
+  let dialogAncestor = null;
+  while (node && node !== document.body) {
+    const role = node.getAttribute?.('role');
+    if (role === 'dialog' || role === 'alertdialog') {
+      dialogAncestor = node;
+      break;
+    }
+    node = node.parentElement;
+  }
+  const container = dialogAncestor || topEl;
+  const text = normalizeText(container.innerText || '').slice(0, 160);
+  return {
+    tag: topEl.tagName || '',
+    testId: topEl.getAttribute?.('data-testid') || container.getAttribute?.('data-testid') || '',
+    role: container.getAttribute?.('role') || '',
+    text
+  };
+}
+
+function describeBlockingOverlay(overlay) {
+  if (!overlay) return '';
+  return `role=${overlay.role || 'n/a'} testid=${overlay.testId || 'n/a'} text="${overlay.text || ''}"`;
+}
+
 async function clickElementReliably(element, label = '按钮') {
   if (!element) throw new Error(`${label} 不存在`);
   element.scrollIntoView?.({ block: 'center', inline: 'center' });
@@ -770,6 +1088,12 @@ async function clickElementReliably(element, label = '按钮') {
   const rect = element.getBoundingClientRect();
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;
+
+  const blockingOverlay = findBlockingOverlayAt(x, y, element);
+  if (blockingOverlay) {
+    addLog('warn', `${label} 点击位置疑似被未知弹窗/元素遮挡：${describeBlockingOverlay(blockingOverlay)}`);
+  }
+
   const response = await runtimeMessage({ action: 'trustedClick', x, y }).catch(error => ({
     success: false,
     error: error.message
@@ -778,12 +1102,13 @@ async function clickElementReliably(element, label = '按钮') {
   if (response?.success) {
     addLog('info', `已通过 Chrome 真实鼠标事件点击${label}`);
     await sleep(450);
-    return;
+    return { blockedByOverlay: Boolean(blockingOverlay), overlaySnapshot: blockingOverlay };
   }
 
   addLog('warn', `真实鼠标事件点击失败，回退 DOM 点击${label}: ${response?.error || 'unknown'}`);
   simulateRealClick(element);
   await sleep(450);
+  return { blockedByOverlay: Boolean(blockingOverlay), overlaySnapshot: blockingOverlay };
 }
 
 async function waitForIntentSendOutcome(expectedText, timeout = 18000) {
@@ -1007,6 +1332,13 @@ setTimeout(() => {
   });
 }, 3000);
 
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace !== 'local') return;
+  if (changes.pendingPost?.newValue && changes.pendingPost.newValue !== changes.pendingPost.oldValue) {
+    schedulePendingPostRetry('检测到新的待发推文，准备执行发帖', 800);
+  }
+});
+
 async function handlePendingReply() {
   if (isAutomatorBusy) {
     addLog('warn', '上一次回复/发推操作尚未完成，跳过本次 intent 回复触发');
@@ -1023,11 +1355,11 @@ async function handlePendingReply() {
     }
 
     isAutomatorBusy = true;
-    chrome.storage.local.set({ isTyping: true });
+    applyReplyFlowEvent(ReplyFlowEvents.SENDING_STARTED, { pendingReply: pending });
 
     try {
       if (isLoggedOutOrBlocked()) {
-        pauseAutomation('X 页面可能未登录、报错或出现验证，已暂停回复');
+        pauseReplyAutomation('X 页面可能未登录、报错或出现验证，已暂停回复');
         return;
       }
 
@@ -1043,7 +1375,7 @@ async function handlePendingReply() {
       const replyTextForSend = intentText || pending.replyText;
       const expectedText = normalizeText(replyTextForSend);
       if (!expectedText) {
-        pauseAutomation('X intent 回复文本为空，已暂停');
+        pauseReplyAutomation('X intent 回复文本为空，已暂停');
         return;
       }
       if (intentText && normalizeText(intentText) !== normalizeText(pending.replyText)) {
@@ -1052,18 +1384,20 @@ async function handlePendingReply() {
 
       const draftEditor = await waitForElement(findTweetEditor, 10000);
       if (!draftEditor) {
-        pauseAutomation('未找到 X intent 回复编辑器，已暂停');
+        const diagnostics = getIntentComposerDiagnostics();
+        addLog('warn', `X intent 回复编辑器诊断: ${diagnostics}`);
+        pauseReplyAutomation(`未找到 X intent 回复编辑器，已暂停。${diagnostics}`);
         return;
       }
 
       let actualText = getEditorText(draftEditor);
-      if (actualText !== expectedText) {
+      if (!hasSubstantialTextMatch(actualText, expectedText)) {
         addLog('warn', `intent 回复预填文本暂未匹配，等待 X 渲染。当前: ${actualText.substring(0, 40)}...`);
         await sleep(1200);
         actualText = getEditorText(draftEditor);
       }
 
-      if (actualText !== expectedText) {
+      if (!hasSubstantialTextMatch(actualText, expectedText)) {
         addLog('warn', 'X intent 未完成预填，尝试一次真实编辑器输入');
         await simulateTyping(draftEditor, replyTextForSend);
         await sleep(1200);
@@ -1088,14 +1422,18 @@ async function handlePendingReply() {
       if (!sendBtn) {
         const dialog = findActiveDialog();
         const currentButton = dialog ? findSendButton(dialog) : findSendButton(document);
-        pauseAutomation(`X intent 回复按钮未启用，已暂停。按钮状态 ${getButtonDisabledReason(currentButton)}`);
+        pauseReplyAutomation(`X intent 回复按钮未启用，已暂停。按钮状态 ${getButtonDisabledReason(currentButton)}`);
         return;
       }
 
-      await clickElementReliably(sendBtn, 'X intent 回复按钮');
+      const clickResult = await clickElementReliably(sendBtn, 'X intent 回复按钮');
       let outcome = await waitForIntentSendOutcome(expectedText, 7000);
 
-      if (outcome.status === 'pending') {
+      if (outcome.status === 'pending' && clickResult?.blockedByOverlay) {
+        // Same defensive logic as the post flow: don't blindly retry into an overlay we can't
+        // identify. Surface it in the pause reason so it's actionable from logs.
+        outcome.reason = `${outcome.reason}；发送按钮点击疑似被未知弹窗遮挡（${describeBlockingOverlay(clickResult.overlaySnapshot)}），已跳过盲目重试`;
+      } else if (outcome.status === 'pending') {
         const dialog = findActiveDialog();
         const editor = findTweetEditor(dialog || document);
         
@@ -1118,16 +1456,20 @@ async function handlePendingReply() {
           return activeDialog ? findSendButton(activeDialog) : findSendButton(document);
         }, 2000);
 
-        if (retryButton && getEditorText(editor) === expectedText) {
+        if (retryButton && hasSubstantialTextMatch(getEditorText(editor), expectedText)) {
           addLog('warn', 'Ctrl+Enter 后仍未发送，最后重试一次真实鼠标点击');
-          await clickElementReliably(retryButton, 'X intent 回复按钮重试');
+          const retryClickResult = await clickElementReliably(retryButton, 'X intent 回复按钮重试');
+          outcome = await waitForIntentSendOutcome(expectedText, 18000);
+          if (outcome.status === 'pending' && retryClickResult?.blockedByOverlay) {
+            outcome.reason = `${outcome.reason}；重试点击同样被疑似未知弹窗遮挡（${describeBlockingOverlay(retryClickResult.overlaySnapshot)}）`;
+          }
+        } else {
+          outcome = await waitForIntentSendOutcome(expectedText, 18000);
         }
-        
-        outcome = await waitForIntentSendOutcome(expectedText, 18000);
       }
 
       if (!['success', 'duplicate'].includes(outcome.status)) {
-        pauseAutomation(`X intent 回复未确认成功，已暂停。${outcome.reason}`);
+        pauseReplyAutomation(`X intent 回复未确认成功，已暂停。${outcome.reason}`);
         return;
       }
 
@@ -1135,6 +1477,8 @@ async function handlePendingReply() {
       await removeLocalStorage(['pendingReply']);
       if (outcome.status === 'duplicate') {
         await closeOpenComposerBeforeNavigation('清理重复回复编辑器');
+      } else {
+        await settleComposerAfterSuccessfulSend(expectedText, '回复发送成功后清理编辑器残留');
       }
       addLog('success', outcome.status === 'duplicate'
         ? `X 提示已回复过 @${pending.tweetAuthor || '未知用户'}，已按完成处理：${outcome.reason}`
@@ -1145,10 +1489,10 @@ async function handlePendingReply() {
       const reason = `X intent 自动回复异常: ${error.message} (连续失败 ${consecutiveFailures} 次)`;
       addLog('error', reason);
       notifyReplyFailed(reason);
-      checkAndPause();
+      checkAndPause(pauseReplyAutomation);
     } finally {
-      chrome.storage.local.set({ isTyping: false });
       isAutomatorBusy = false;
+      resumePendingPostIfAny();
     }
   });
 }
@@ -1156,10 +1500,11 @@ async function handlePendingReply() {
 async function handlePendingPost() {
   if (isAutomatorBusy) {
     addLog('warn', '上一次回复/发推操作尚未完成，跳过本次发推触发');
+    schedulePendingPostRetry('上一次回复/发推操作尚未完成，稍后重试发帖');
     return;
   }
   if (!chrome.runtime?.id) return;
-  chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'isRunning'], async (result) => {
+  chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'isRunning', 'isPosting', 'isPostingStartedAt'], async (result) => {
     const isManualTest = result.pendingPostSource === 'manualTest';
     if (!result.isRunning && !isManualTest) {
       addLog('info', '机器人已停止，跳过发推');
@@ -1168,13 +1513,17 @@ async function handlePendingPost() {
     if (!result.pendingPost) {
       return;
     }
+    if (isFreshPostingLock(result)) {
+      addLog('info', '已有发帖流程在执行，跳过重复触发');
+      return;
+    }
     
     isAutomatorBusy = true;
     const postText = String(result.pendingPost || '').trim();
     const expectedText = normalizeText(postText);
     
     addLog('info', isManualTest ? '开始执行测试发文...' : '开始执行定时发文...');
-    chrome.storage.local.set({ isTyping: true });
+    chrome.storage.local.set({ isPosting: true, isPostingStartedAt: Date.now() });
     try {
       if (!postText) {
         pauseAutomation('待发推文为空，已暂停');
@@ -1183,6 +1532,21 @@ async function handlePendingPost() {
 
       if (isLoggedOutOrBlocked()) {
         pauseAutomation('X 页面可能未登录、报错或出现验证，已暂停发推');
+        return;
+      }
+
+      const openComposer = findMatchingOpenPostComposer(expectedText);
+      if (openComposer) {
+        addLog('info', '检测到已打开且文本匹配的发帖编辑器，直接接管发送');
+        const outcome = await clickPostSendAndWait(expectedText, isManualTest);
+        if (!outcome) return;
+        if (outcome.status === 'duplicate') {
+          await closeOpenComposerBeforeNavigation('清理重复发布编辑器');
+        } else {
+          await settleComposerAfterSuccessfulSend(expectedText, '发帖成功后清理编辑器残留');
+        }
+        await notifyPostCompleted(result.pendingPostSource || 'queue', getLatestVisibleStatusMeta());
+        await leaveIntentPostPageAfterSuccess();
         return;
       }
 
@@ -1199,13 +1563,13 @@ async function handlePendingPost() {
       }
 
       let actualText = getEditorText(draftEditor);
-      if (actualText !== expectedText) {
+      if (!hasSubstantialTextMatch(actualText, expectedText)) {
         addLog('warn', `预填文本暂未匹配，等待 X 渲染。当前: ${actualText.substring(0, 40)}...`);
         await sleep(1200);
         actualText = getEditorText(draftEditor);
       }
 
-      if (actualText !== expectedText) {
+      if (!hasSubstantialTextMatch(actualText, expectedText)) {
         addLog('warn', 'X intent 未完成预填，尝试一次真实编辑器输入');
         await simulateTyping(draftEditor, postText);
         await sleep(1200);
@@ -1228,72 +1592,22 @@ async function handlePendingPost() {
         consecutiveFailures = 0;
         addLog('success', `X 提示这条内容已发布过，已消费当前待发任务：${duplicateBeforeClick}`);
         await closeOpenComposerBeforeNavigation('清理重复发布编辑器');
-        notifyPostCompleted(result.pendingPostSource || 'queue');
+        await notifyPostCompleted(result.pendingPostSource || 'queue', getLatestVisibleStatusMeta());
+        await leaveIntentPostPageAfterSuccess();
         return;
       }
 
 
 
-      const postDialog = draftEditor.closest('div[role="dialog"]') || document.querySelector('div[role="dialog"]');
-      let sendBtn = postDialog ? findSendButton(postDialog) : findSendButton(document);
-      if (!sendBtn) {
-        sendBtn = await waitForElement(() => {
-          const dialog = document.querySelector('div[role="dialog"]');
-          return dialog ? findSendButton(dialog) : findSendButton(document);
-        }, 5000);
-      }
-
-      if (!sendBtn) {
-        consecutiveFailures++;
-        addLog('error', `未找到发推按钮 (连续失败 ${consecutiveFailures} 次)`);
-        checkAndPause();
-        return;
-      }
-
-      sendBtn = await waitForEnabledButton(() => {
-        const dialog = document.querySelector('div[role="dialog"]');
-        return dialog ? findSendButton(dialog) : findSendButton(document);
-      }, 10000);
-
-      if (!sendBtn) {
-        consecutiveFailures++;
-        addLog('error', `发推按钮未自然启用，取消发推 (连续失败 ${consecutiveFailures} 次)`);
-        checkAndPause();
-        return;
-      }
-
-      await clickElementReliably(sendBtn, '发推按钮');
-      let outcome = await waitForIntentSendOutcome(expectedText, 10000);
-      if (outcome.status === 'pending') {
-        const dialog = findActiveDialog();
-        const editor = findTweetEditor(dialog || document);
-        const retryButton = await waitForEnabledButton(() => {
-          const activeDialog = findActiveDialog();
-          return activeDialog ? findSendButton(activeDialog) : findSendButton(document);
-        }, 2000);
-
-        if (retryButton && getEditorText(editor) === expectedText) {
-          addLog('warn', '首次点击发推后未检测到发送结果，重试一次真实鼠标点击');
-          await clickElementReliably(retryButton, '发推按钮重试');
-          outcome = await waitForIntentSendOutcome(expectedText, 18000);
-        }
-      }
-
-      if (!['success', 'duplicate'].includes(outcome.status)) {
-        consecutiveFailures++;
-        addLog('warn', `发帖未确认成功，已暂停。${outcome.reason} (连续失败 ${consecutiveFailures} 次)`);
-        pauseAutomation(`发帖未确认成功，已暂停。${outcome.reason}`);
-        return;
-      }
-
-      consecutiveFailures = 0;
-      addLog('success', outcome.status === 'duplicate'
-        ? `X 提示这条内容已发布过，已消费当前待发任务：${outcome.reason}`
-        : (isManualTest ? `测试推文发送成功！${outcome.reason}` : `定时推文发送成功！${outcome.reason}`));
+      const outcome = await clickPostSendAndWait(expectedText, isManualTest);
+      if (!outcome) return;
       if (outcome.status === 'duplicate') {
         await closeOpenComposerBeforeNavigation('清理重复发布编辑器');
+      } else {
+        await settleComposerAfterSuccessfulSend(expectedText, '发帖成功后清理编辑器残留');
       }
-      notifyPostCompleted(result.pendingPostSource || 'queue');
+      await notifyPostCompleted(result.pendingPostSource || 'queue', getLatestVisibleStatusMeta());
+      await leaveIntentPostPageAfterSuccess();
       
     } catch (e) {
       consecutiveFailures++;
@@ -1304,7 +1618,7 @@ async function handlePendingPost() {
         setTimeout(handlePendingPost, 5000);
       }
     } finally {
-      chrome.storage.local.set({ isTyping: false });
+      chrome.storage.local.set({ isPosting: false, isPostingStartedAt: 0 });
       isAutomatorBusy = false;
     }
   });

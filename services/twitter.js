@@ -29,7 +29,7 @@ async function performTrustedClick(tabId, x, y) {
               target: el,
               nativeEvent: new MouseEvent('click', { bubbles: true, cancelable: true, clientX, clientY })
             });
-            console.log("X Auto Bot: Injected React onClick successfully!");
+            console.log("VibeX: Injected React onClick successfully.");
             // return; // We still do the fallback just in case the React handler expects DOM events to bubble
           }
         } catch(e) {}

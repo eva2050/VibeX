@@ -1,5 +1,6 @@
 function includesAny(text, words = []) {
-  return words.some(word => text.includes(String(word).toLowerCase()));
+  const lowerText = String(text || '').toLowerCase();
+  return words.some(word => lowerText.includes(String(word || '').toLowerCase()));
 }
 
 function countPatternMatches(text = '', pattern) {

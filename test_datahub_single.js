@@ -1,7 +1,11 @@
-const DATAHUB_API_KEY = "zUBzC9YgT9f8VLrh";
+const DATAHUB_API_KEY = process.env.DATAHUB_API_KEY || '';
 const url = "https://www.zhihu.com/question/2041447752677200286";
 
 async function testUrl(url) {
+  if (!DATAHUB_API_KEY) {
+    console.error('Set DATAHUB_API_KEY before running this script.');
+    return;
+  }
   try {
     const res = await fetch('https://datahub.codes/api/datahub/execute/v0', {
       method: 'POST',
@@ -23,7 +27,9 @@ async function testUrl(url) {
     while(attempts < 10) {
       await new Promise(r => setTimeout(r, 2000));
       attempts++;
-      const pollRes = await fetch(`https://datahub.codes/api/processes/${processId}.md?key=${DATAHUB_API_KEY}`);
+      const pollRes = await fetch(`https://datahub.codes/api/processes/${encodeURIComponent(processId)}.md`, {
+        headers: { 'X-API-Key': DATAHUB_API_KEY }
+      });
       console.log(`[POLL ${attempts}] Status: ${pollRes.status}`);
       if (pollRes.status === 200) {
          console.log(await pollRes.text());

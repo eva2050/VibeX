@@ -1,0 +1,261 @@
+[
+  {
+    "id": "vibe-coding-human-pass",
+    "type": "positive",
+    "input": "vibe coding像一种就是以创造为形式的一种消费行为。你做出来的东西不一定要对别人有用，你自己在这个过程很开心，它本身就是一种很好的体验。产品可能没人用，逻辑可能跑不通，甚至你自己明天都不会再打开。可那又怎样呢？创造的快乐，本身就是内啡肽的来源。",
+    "output": "越来越觉得，vibe coding 更像一种创造型消费。做东西也只是为了短暂的悦己。\n\n产品没人用，商业逻辑跑不通，甚至你自己下周都不会再打开页面看一眼。可那又怎样呢？你在做的时候是开心的，这件事本身就已经成立了。刷短视频是别人喂你多巴胺，vibe coding 是你自己造一点内啡肽。\n\n前者是消费，后者也是消费，只不过它顺手让你创造了一下。只要你享受这个过程，那一切就是值得的。",
+    "expectApproved": true
+  },
+  {
+    "id": "codex-complaint-human-pass",
+    "type": "positive",
+    "input": "发现最近codex执行任务的时间越来越久了，哪怕一个小功能，都会反复校对，随随便便都把任务时间拉到十几分钟以上。一看推理猛如虎，结果一看代码才改了几十行。这是用时间去拉低用户Token消耗么",
+    "output": "Codex 最近越来越像那种开会开一下午、最后产出三行结论的同事。推理猛如虎，改动十几行。你说它偷懒吧，日志里确实在想；你说它认真吧，产出对不上时间。合理怀疑是在拿时长换 token 成本。",
+    "expectApproved": true
+  },
+  {
+    "id": "commerce-comparison-pass",
+    "type": "positive",
+    "input": "京东赌中产越来越多，淘宝赌网购人群扩大，拼多多赌消费降级。",
+    "output": "十年前三家电商赌的是同一副牌。\n\n京东押中产越来越多，淘宝押网购人群继续扩大，拼多多押消费降级。\n\n结果最刺眼的地方在于：拼多多赢的不是技术，而是它看懂了大多数人口袋里其实没几个钢镚。",
+    "expectApproved": true
+  },
+  {
+    "id": "good-zh-4",
+    "type": "positive",
+    "input": "现在很多大模型应用都在做套壳，感觉没有核心壁垒，随时会被官方降维打击。",
+    "output": "大家都在聊套壳应用没有壁垒，迟早被官方干掉。\n\n但这可能只对了一半。真正的风险不是大厂下场，而是你根本不知道自己的用户在为什么付钱。很多人在卖 prompt，结果用户买的其实是情绪价值或者时间差。\n\n技术壁垒是很脆的，但特定场景下的信任闭环很难被一波带走。",
+    "expectApproved": true
+  },
+  {
+    "id": "good-zh-5",
+    "type": "positive",
+    "input": "远程工作其实很容易模糊工作和生活的界限，最后变成全天都在待命。",
+    "output": "很多人以为远程办公是自由。\n\n但其实它不是消除了工作，而是消除了“下班”。当你的床和工位只有两步路的时候，半夜回消息的边界感就彻底消失了。以前你是去公司上班，现在你是住在了公司里。",
+    "expectApproved": true
+  },
+  {
+    "id": "good-zh-6",
+    "type": "positive",
+    "input": "买了很多付费课，最后发现还是不如直接去读官方文档有用。",
+    "output": "花几千块买课，最后的归宿通常是回去啃官方文档。\n\n很多时候我们买的不是知识，而是“买完就能掌握”的幻觉。二手知识嚼得再碎，也不如自己踩过一次坑来得实在。",
+    "expectApproved": true
+  },
+  {
+    "id": "good-zh-7",
+    "type": "positive",
+    "input": "买了很多域名，但其实一个完整的项目都没做出来。",
+    "output": "买域名的那一刻，往往是一个 side project 生命力最旺盛的巅峰。\n\n你买下的不是一串字符，而是一种“我即将干一票大的”的廉价幻觉。等到第二年域名商发来续费提醒的时候，你可能连项目名字都要想半天。",
+    "expectApproved": true
+  },
+  {
+    "id": "good-zh-8",
+    "type": "positive",
+    "input": "全职做独立开发者一年了，收入还不够交房租的。是放弃还是坚持？",
+    "output": "独立开发一年，收入还没打工时一个月多。最难受的不是穷，是你没法跟任何人解释你到底在干什么。",
+    "expectApproved": true
+  },
+  {
+    "id": "good-zh-9",
+    "type": "positive",
+    "input": "感觉今年出海特别火，所有群都在聊怎么做海外市场。",
+    "output": "今年但凡是个行业群，三句离不开“出海”。\n\n仿佛出海就能自动治好所有的增长焦虑。但很多人根本没想清楚到底是在做全球化产品，还是只在倒腾一些海外的信息差。换个地方卷，其实还是在卷。",
+    "expectApproved": true
+  },
+  {
+    "id": "good-zh-10",
+    "type": "positive",
+    "input": "看别人年纪轻轻就财富自由了，自己还在打工，心态有点崩。",
+    "output": "算法总喜欢给你推那些二十多岁就财富自由的故事。\n\n看得多了，很容易觉得自己的人生已经烂透了。但仔细想想，这种极少数的幸存者偏差，凭什么要成为你衡量普通生活的标准？接受自己是个普通人，可能是治好焦虑最管用的一剂药。",
+    "expectApproved": true
+  },
+  {
+    "id": "english-template-fail",
+    "type": "negative",
+    "input": "AI内容越来越安全，每句话都像委员会批准过。",
+    "output": "Most creators sound like they were written by a committee.\n\nEvery sentence is safe. Every take is approved.\n\nThat's not a voice. That's a liability.\n\nThat's the edge.",
+    "expectApproved": false,
+    "expectedIssues": [
+      "template_tone"
+    ]
+  },
+  {
+    "id": "unsupported-data-fail",
+    "type": "negative",
+    "input": "只要你足够穷，别人对你的态度都无比真实。",
+    "output": "承认吧，这话戳中了大半个行业的脸。2026年Q2数据显示，Crypto 初创企业近8成半年内融不到下一轮，而其中6成以上主动降低华人管理层曝光度。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "unsupported_hard_facts"
+    ]
+  },
+  {
+    "id": "over-segmented-fail",
+    "type": "negative",
+    "input": "vibe coding 像一种创造型消费，过程开心就已经值得。",
+    "output": "vibe coding 最真实的一点：不是创造，是消费。\n\n你做出来的东西没人用。\n\n逻辑跑不通。\n\n明天不会再打开。\n\n但你很开心。\n\n这就够了。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "template_tone",
+      "over_segmented"
+    ]
+  },
+  {
+    "id": "over-expanded-fail",
+    "type": "negative",
+    "input": "一个小功能，反复校对十几分钟，最后只改了几十行。",
+    "output": "一个小功能，反复校对十几分钟，最后只改了几十行。\n\n这背后其实暴露了 AI 编程工具正在进入一个新的阶段：它们不再只是执行任务，而是在模拟一种看似专业、谨慎、可靠的工作过程。用户看到的是长时间推理、反复验证、不断自我校对，于是更容易相信结果足够安全。但真正的问题是，产出并没有随着时间线性增长。你等了更久，拿到的也许只是更完整的解释，而不是更有效的改动。\n\n如果未来所有工具都把慢包装成认真，那么效率工具反而会变成新的时间黑洞。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "over_expanded"
+    ]
+  },
+  {
+    "id": "bad-zh-5-template",
+    "type": "negative",
+    "input": "感觉很多AI工具都一样，没什么新意。",
+    "output": "最反直觉的一点是：很多看似高端的AI工具，底层逻辑竟然是一样的。\n真正的真相是，大家都在套同样的壳。\n你发现了吗？只有洞悉本质，才能在红海中脱颖而出。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "template_tone"
+    ]
+  },
+  {
+    "id": "bad-zh-6-facts",
+    "type": "negative",
+    "input": "远程工作挺爽的，省了通勤时间。",
+    "output": "远程工作最大的红利其实是通勤。麦肯锡2025年最新调查显示，全球有67%的白领希望永久居家办公，每周平均节省约8.5小时。这不仅仅是时间的节约，更是生命质量的提升。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "unsupported_hard_facts"
+    ]
+  },
+  {
+    "id": "bad-zh-7-segmented",
+    "type": "negative",
+    "input": "做产品要有耐心，不能总是想着一夜爆红。",
+    "output": "做产品。\n\n最忌讳的。\n\n就是想一夜爆红。\n\n耐心点。\n\n慢慢熬。\n\n时间会给你答案。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "over_segmented"
+    ]
+  },
+  {
+    "id": "bad-zh-8-expanded",
+    "type": "negative",
+    "input": "今天早餐吃了油条，感觉有点油腻。",
+    "output": "今天早餐吃了油条，感觉有些油腻。\n这其实反映了现代人在饮食结构上的深层焦虑。随着生活节奏的加快，我们越来越依赖这种高碳水、高脂肪的快餐来快速补充能量。但同时，健康意识的觉醒又让我们在吃完后陷入自责。这不仅是一个关于早餐的选择题，更是一个关于如何在快节奏生活中寻找健康平衡的现代人困境。也许我们需要重新审视自己的生活方式，从一顿清淡的早餐开始，找回掌控感。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "over_expanded"
+    ]
+  },
+  {
+    "id": "bad-zh-9-nosignal",
+    "type": "negative",
+    "input": "今天天气不错，适合出门走走。",
+    "output": "好天气总是让人心情愉悦。在这个阳光明媚的日子里，出去散步确实是个好主意。享受大自然，放松身心，度过美好的一天吧。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "no_concrete_signal"
+    ]
+  },
+  {
+    "id": "bad-zh-10-markdown",
+    "type": "negative",
+    "input": "推荐三个好用的效率工具。",
+    "output": "效率工具推荐：\n**1. Notion**\n强大的笔记应用。\n**2. Raycast**\n极简的快捷启动器。\n**3. Arc**\n创新的浏览器体验。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "markdown_artifacts"
+    ]
+  },
+  {
+    "id": "good-en-1",
+    "type": "positive",
+    "input": "Just shipped the new feature. Building in public is harder than it looks, you get so much noise.",
+    "output": "Building in public always sounds great until you actually do it.\n\nFor every genuinely helpful piece of feedback, you get ten people telling you to pivot into crypto or add AI. The hardest part isn't shipping the feature—it's learning how to aggressively filter the noise without becoming cynical.",
+    "expectApproved": true
+  },
+  {
+    "id": "good-en-2",
+    "type": "positive",
+    "input": "Nobody wants another productivity app. We just want to get our work done.",
+    "output": "The tech bubble convinced us that every problem needs a new SaaS tool.\n\nBut honestly? Most people don't want another productivity app to manage their productivity apps. They just want to close their laptop at 5 PM and not think about work. The next big thing might just be software that gets out of your way.",
+    "expectApproved": true
+  },
+  {
+    "id": "bad-en-3-template",
+    "type": "negative",
+    "input": "Remote work is changing how we collaborate.",
+    "output": "Most founders get remote work completely wrong.\n\nThe counter-intuitive truth? It's not about Zoom calls. It's about async communication.\n\nIf your async game isn't on point, you're just doing the office, but worse.\n\nThat's the edge.",
+    "expectApproved": false,
+    "expectedIssues": [
+      "template_tone"
+    ]
+  },
+  {
+    "id": "bad-en-4-hashtag",
+    "type": "negative",
+    "input": "Learning to code is a marathon, not a sprint.",
+    "output": "Learning to code is a marathon, not a sprint. Take your time and enjoy the journey! #coding #100DaysOfCode #developer #programming",
+    "expectApproved": false,
+    "expectedIssues": [
+      "hashtag"
+    ]
+  },
+  {
+    "id": "bad-en-5-facts",
+    "type": "negative",
+    "input": "AI is eating software faster than expected.",
+    "output": "AI is eating software at an unprecedented rate. Recent reports from Gartner indicate that by 2027, over 80% of enterprise applications will have embedded AI, leading to a massive shift in developer roles.",
+    "expectApproved": false,
+    "expectedIssues": [
+      "unsupported_hard_facts"
+    ]
+  },
+  {
+    "id": "reply-good-1",
+    "type": "positive",
+    "input": "Context Tweet: 'AI won't replace developers, it will just make them 10x faster.'\nMy thought: completely agree, but it also lowers the barrier to entry so there will be more competition.",
+    "output": "Totally. The 10x speed boost is real, but the bigger shift is the barrier to entry collapsing. When anyone can spin up a prototype in a weekend, the competition stops being about who writes better code and starts being about who understands the user better.",
+    "expectApproved": true
+  },
+  {
+    "id": "reply-good-2",
+    "type": "positive",
+    "input": "Context Tweet: '大家都在焦虑流量，其实做好产品自然有流量。'\nMy thought: 幸存者偏差，好产品死掉的太多了，还是要懂营销。",
+    "output": "这大概是最大的幸存者偏差了。\n\n每年死掉的“好产品”多如牛毛，只是我们看不到而已。酒香也怕巷子深，产品力和营销能力缺一不可，光靠“自然流量”在现在的环境里太奢侈了。",
+    "expectApproved": true
+  },
+  {
+    "id": "reply-bad-3-template",
+    "type": "negative",
+    "input": "Context Tweet: 'How to get 10k followers in 30 days.'\nMy thought: it's all engagement bait.",
+    "output": "Most creators get this wrong.\n\nThe real secret to 10k followers isn't value, it's pure engagement bait.\n\nIf you're not doing this, you're missing out.",
+    "expectApproved": false,
+    "expectedIssues": [
+      "template_tone"
+    ]
+  },
+  {
+    "id": "reply-bad-4-nosignal",
+    "type": "negative",
+    "input": "Context Tweet: '今天发布了新版本！'\nMy thought: 恭喜！",
+    "output": "恭喜发布新版本！真的是太棒了，期待看到更多的好功能，继续加油！",
+    "expectApproved": false,
+    "expectedIssues": [
+      "no_concrete_signal"
+    ]
+  },
+  {
+    "id": "reply-bad-5-expanded",
+    "type": "negative",
+    "input": "Context Tweet: 'Next.js is getting too complex.'\nMy thought: just use Vite.",
+    "output": "确实如此，Next.js 的生态虽然庞大，但随之而来的配置复杂度和学习曲线也在不断攀升，对于很多中小型项目来说，这无疑增加了极度不必要的维护成本，让人感到非常疲惫。\n\n相比之下，Vite 提供了一种更加轻量、快速且现代化的构建体验，它的热更新速度令人惊叹，配置也极其直观易懂。如果在项目中不需要复杂的 SSR 功能，也许回归 Vite 才是更明智的选择，它能让你重新找回纯粹的开发乐趣，提高团队的整体效率。",
+    "expectApproved": false,
+    "expectedIssues": [
+      "over_expanded"
+    ]
+  }
+]

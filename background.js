@@ -4,23 +4,58 @@ import { bestViralCandidate, getGeneratedReplyRejectionReason } from './utils/sc
 import { getStorage, setStorage, addLog, getConfigErrors, getAIConnectionErrors, canAutoPublish } from './core/state.js';
 import { callLLM } from './services/llm.js';
 import { performTrustedClick } from './services/twitter.js';
+import { connectXWithOAuth, getXOAuthRequestPreview, normalizeXAuth } from './services/xApi.js';
 import { generateSingleTweetDraft, normalizeAgentMemory, mergeAgentMemory } from './core/automation.js';
 import { buildGenerationContext } from './core/generationContext.js';
-import { POST_ORIGIN, POST_STATUS, normalizePostRecord } from './core/storageSchema.js';
+import { POST_CONTENT_MODE, POST_ORIGIN, POST_STATUS, STORAGE_SCHEMA_VERSION, normalizeAiMemory, normalizePostRecord } from './core/storageSchema.js';
+import { applyPerformanceReview, buildAccountPerformanceBaseline, updateAiMemoryWithReviewedPost } from './core/performanceLoop.js';
+import { DEFAULT_POST_REVIEW_DELAY_MS, buildAutoReviewSchedule, getNextAutoReviewAtAfterFailure, repairAutoReviewRecord, shouldRepairAutoReview } from './core/performanceReviewScheduler.js';
+import { getLanguageInstruction, getLanguageName, getPromptText, normalizeEngineLanguage, toPreferredLanguage } from './core/i18n.js';
+import { buildInitialAutoPersona, localizeAutoPersona, resolveAutoPersonaLanguage } from './core/autoPersona.js';
+import { inferDominantAccountLanguage, normalizeDetectedAccountLanguage } from './core/accountLanguage.js';
+import { buildReplyStrategyInstruction } from './core/replyStrategies.js';
+import { formatStyleSampleLearningForPrompt, getStyleSamples } from './core/styleLearning.js';
 import { REPLY_RETRY_LOCK_MS, DEFAULT_AGENT_MEMORY, AGENT_MEMORY_LABELS, GROWTH_PLAYBOOKS, DEFAULT_INTERACTION_TARGETS, PROJECT_ACCOUNT_HANDLES, DEFAULT_DISCOVERY_KEYWORDS, selectGrowthPlaybook } from './core/constants.js';
 import { setupMessageRouter } from "./handlers/messageRouter.js";
-import { pullFromGist, pushToGist } from './core/syncLogic.js';
+import './core/automationState.js';
+
+const { EVENTS: REPLY_FLOW_EVENTS, buildReplyFlowTransition, hasActiveReplyFlow } = globalThis.VibeXAutomationState;
 
 console.log('[VibeX] ✅ Service Worker started successfully. All modules loaded.');
 
-let gistSyncTimer = null;
-const SYNC_KEYS = ['apiKey', 'apiProvider', 'aiModel', 'customPromptGlobal', 'petEnabled', 'accountBio', 'leadTarget', 'aiPersona', 'styleTrainingData', 'engineLanguage', 'replyStrategy', 'feedbackLoopData', 'aiMemory', 'collectedTweets', 'onboardingStrategy', 'targetUsers', 'competitorReport', 'agentMemory', 'smartTimeSlots', 'postsPerDay', 'postInterval', 'gistToken', 'gistId', 'gistAutoSync'];
+const PERFORMANCE_REVIEW_ALARM = 'performanceReviewAlarm';
+const POST_REVIEW_DELAY_MS = DEFAULT_POST_REVIEW_DELAY_MS;
+const POST_TRIGGER_COOLDOWN_MS = 25 * 1000;
+const POSTING_LOCK_TTL_MS = 20 * 1000;
+
+function isFreshPostingLock(state = {}, now = Date.now()) {
+  return Boolean(state.isPosting && now - Number(state.isPostingStartedAt || 0) < POSTING_LOCK_TTL_MS);
+}
 
 
 // background.js
 
 // Storage Abstraction (Promise Wrapper)
 
+function runStorageMigration() {
+  chrome.storage.local.get(['storageSchemaVersion', 'draftVault', 'aiMemory'], (res) => {
+    if (Number(res.storageSchemaVersion) >= STORAGE_SCHEMA_VERSION) return;
+    const updates = {
+      storageSchemaVersion: STORAGE_SCHEMA_VERSION,
+      aiMemory: normalizeAiMemory(res.aiMemory || {})
+    };
+    if (Array.isArray(res.draftVault)) {
+      updates.draftVault = res.draftVault.slice(0, 100).map(normalizePostRecord);
+    }
+    chrome.storage.local.set(updates, () => {
+      addLog('info', 'storage_migrated', [STORAGE_SCHEMA_VERSION]);
+    });
+  });
+}
+
+runStorageMigration();
+repairPendingPerformanceReviews();
+schedulePerformanceReviewAlarm();
 
 
 
@@ -33,8 +68,9 @@ const SYNC_KEYS = ['apiKey', 'apiProvider', 'aiModel', 'customPromptGlobal', 'pe
 
 
 
-// Auto-populate mock key and force-disable petEnabled for standard automation layout
-chrome.storage.local.get(['apiKey', 'petEnabled', 'collectedTweets'], (res) => {
+
+// Initialize local defaults for the current local-first extension experience.
+chrome.storage.local.get(['apiKey', 'collectedTweets'], (res) => {
   const updates = {};
   if (!res.leadTarget) {
     updates.leadTarget = 'VibeX Growth';
@@ -42,8 +78,6 @@ chrome.storage.local.get(['apiKey', 'petEnabled', 'collectedTweets'], (res) => {
   if (!res.collectedTweets) {
     updates.collectedTweets = [];
   }
-  // Force disable the floating pet mascot immediately as requested
-  updates.petEnabled = false;
   
   chrome.storage.local.set(updates);
 });
@@ -188,7 +222,7 @@ function formatReplyOpportunity(opportunity = {}) {
 
 
 chrome.runtime.onInstalled.addListener((details) => {
-  console.log("X Auto Bot extension installed.");
+  console.log("VibeX extension installed.");
   if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
   }
@@ -196,9 +230,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'update') {
     // Force clear tweet queue on update to ensure any old language drafts are flushed out
     // (No longer flushing tweet queue as instant-generation is used)
-    addLog('info', '扩展已更新，已强制清空发帖队列以应用新规则');
+    addLog('info', 'extension_updated');
   } else {
-    addLog('info', '扩展程序已安装');
+    addLog('info', 'extension_installed');
   }
 
   // 初始化默认配置
@@ -217,18 +251,13 @@ chrome.runtime.onInstalled.addListener((details) => {
         postInterval: 30,
         replyInterval: 30,
         postDeliveryMode: 'local',
-        petEnabled: false,
-        petPersonality: 'explorer',
         collectedTweets: []
       });
     }
   });
-  if (details.reason === 'install') {
-    chrome.runtime.openOptionsPage();
-  }
 });
 
-// 处理来自 content scripts 或 popup 的消息
+// 处理来自 content scripts 或 side panel 的消息
 setupMessageRouter({
   generateAIResponse,
   refreshXOfficialDraftCount,
@@ -240,6 +269,13 @@ setupMessageRouter({
   triggerPostInTab,
   handlePostCompleted,
   checkAndSetupAlarm,
+  runInitialBaselineScan,
+  reviewNextPendingPost,
+  connectXAccount,
+  disconnectXAccount,
+  syncConnectedXData,
+  updateProfileFromSamples,
+  ensureAutomationXTab,
   getIsSidePanelOpen: () => typeof isSidePanelOpen !== "undefined" ? isSidePanelOpen : false
 });
 
@@ -299,8 +335,7 @@ function handleXLoginDetected() {
     if (res.xLoginSettingsOpened || ready) return;
 
     chrome.storage.local.set({ xLoginSettingsOpened: true }, () => {
-      addLog('info', '检测到 X 已登录，自动打开策略中心');
-      chrome.runtime.openOptionsPage();
+      addLog('info', 'x_login_detected');
     });
   });
 }
@@ -320,7 +355,7 @@ function startAccountAutoSetup(sendResponse) {
   }, () => {
     chrome.storage.local.get([], (res) => {
       if (res.accountBio) {
-        addLog('info', '使用已读取的主页简介重新分析账号画像');
+        addLog('info', 'profile_reanalysis_started');
         analyzeAccountPersona(res.accountBio);
         sendResponse({ success: true, message: '已使用当前简介开始 AI 分析' });
         return;
@@ -336,14 +371,14 @@ function triggerProfileReadInTab() {
   chrome.tabs.query({ url: ["*://*.x.com/*", "*://*.twitter.com/*"] }, (tabs) => {
     const target = tabs.find(t => t.active) || tabs[0];
     if (!target) {
-      addLog('info', '未找到 X 标签页，打开 X 首页等待登录/读取');
+      addLog('info', 'x_tab_missing_open_home');
       chrome.tabs.create({ url: 'https://x.com/home', active: true });
       return;
     }
 
     chrome.tabs.sendMessage(target.id, { action: 'forceReadProfileBio' }, () => {
       if (chrome.runtime.lastError) {
-        addLog('warn', `X 标签页未响应读取指令，刷新到 X 首页: ${chrome.runtime.lastError.message}`);
+        addLog('warn', 'x_tab_read_unresponsive', [chrome.runtime.lastError.message]);
         chrome.tabs.update(target.id, { url: 'https://x.com/home', active: true });
       }
     });
@@ -366,13 +401,14 @@ function maybeStartAgentAfterSetup(sendResponse) {
       pauseReason: '',
       twitterCooldownUntil: 0,
       apiCooldownUntil: 0,
-      isGeneratingReply: false,
-      isTyping: false,
+      isPosting: false,
+      isPostingStartedAt: 0,
+      ...buildReplyFlowTransition({}, REPLY_FLOW_EVENTS.CLEAR).update,
       setupAutoStartRequested: false,
       configErrors: []
     }, () => {
       chrome.storage.local.remove(['configErrors']);
-      addLog('success', '策略配置完成，Agent 已自动启动');
+      addLog('success', 'strategy_setup_completed');
       sendResponse?.({ success: true, started: true });
     });
   });
@@ -404,6 +440,28 @@ function checkAndSetupAlarm() {
   });
 }
 
+function ensureAutomationXTab(options = {}) {
+  const active = Boolean(options.active);
+  const reason = options.reason || 'automation_start';
+  chrome.tabs.query({ url: ["*://*.x.com/*", "*://*.twitter.com/*"] }, (tabs) => {
+    const target = tabs.find(tab => tab.active) || tabs[0];
+    if (!target?.id) {
+      addLog('info', 'automation_x_home_opened');
+      chrome.tabs.create({ url: 'https://x.com/home', active });
+      return;
+    }
+
+    chrome.tabs.sendMessage(target.id, { action: 'startAutomationLoop', reason }, () => {
+      if (chrome.runtime.lastError) {
+        addLog('warn', 'automation_x_tab_wake_failed', [chrome.runtime.lastError.message]);
+        chrome.tabs.update(target.id, { url: 'https://x.com/home', active });
+        return;
+      }
+      addLog('info', 'automation_x_tab_awakened');
+    });
+  });
+}
+
 // ==========================================
 // Post Scheduling
 // ==========================================
@@ -424,7 +482,7 @@ function scheduleNextPost() {
     'automationStartTime', 'sessionPostCount', 'onboardingStrategy'
   ], (res) => {
     if (res.isAutoPaused) {
-      addLog('info', '自动操作已暂停，跳过发推调度');
+      addLog('info', 'automation_paused_skip_schedule');
       return;
     }
     
@@ -460,7 +518,7 @@ function scheduleNextPost() {
     
     const targetTimeMs = now.getTime() + delayMs;
     const targetTime = new Date(targetTimeMs);
-    setAlarmAtDate(targetTime, `全自动发帖: 计划 ${targetTime.toLocaleTimeString()} 发推`);
+    setAlarmAtDate(targetTime, 'auto_post_scheduled', [targetTime.toLocaleTimeString()]);
   });
 }
 
@@ -471,13 +529,13 @@ function scheduleInterval(now, config) {
   const targetMin = targetTime.getMinutes();
   const addDays = targetTime.getDate() !== now.getDate() ? 1 : 0;
   setAlarm(targetHour, targetMin, addDays);
-  addLog('info', `固定间隔模式：计划 ${targetTime.toLocaleString()} 发推`);
+  addLog('info', 'post_schedule_fixed', [targetTime.toLocaleString()]);
 }
 
 function scheduleSmart(now, config, postsToday, postsPerDay) {
   const slots = parseTimeSlots(config.smartTimeSlots);
   if (slots.length === 0) {
-    addLog('warn', '智能时段配置为空，使用默认时段');
+    addLog('warn', 'smart_slots_empty');
     slots.push({ start: 8, end: 10 }, { start: 12, end: 14 }, { start: 19, end: 23 });
   }
   
@@ -515,7 +573,7 @@ function scheduleSmart(now, config, postsToday, postsPerDay) {
   
   setAlarm(targetHour, targetMin, addDays);
   const targetTime = new Date(now.getFullYear(), now.getMonth(), now.getDate() + addDays, targetHour, targetMin);
-  addLog('info', `智能分布模式：计划 ${targetTime.toLocaleString()} 发推（今日 ${postsToday}/${postsPerDay}）`);
+  addLog('info', 'post_schedule_smart', [targetTime.toLocaleString(), postsToday, postsPerDay]);
 }
 
 function scheduleForTomorrow(now, config) {
@@ -539,11 +597,12 @@ function setAlarm(targetHour, targetMin, addDays) {
   setAlarmAtDate(targetTime);
 }
 
-function setAlarmAtDate(targetTime, reason = '已安排下一次发推') {
+function setAlarmAtDate(targetTime, logKey = 'next_post_scheduled_default', logArgs = []) {
   chrome.alarms.clear("postTweetAlarm", () => {
     chrome.alarms.create("postTweetAlarm", { when: targetTime.getTime() });
   });
-  addLog('info', `${reason}: ${targetTime.toLocaleString()}`);
+  const args = Array.isArray(logArgs) && logArgs.length > 0 ? logArgs : [targetTime.toLocaleString()];
+  addLog('info', logKey, args);
   chrome.storage.local.set({ nextPostTime: targetTime.toLocaleString() }, () => {
       chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
   });
@@ -600,16 +659,25 @@ function buildPostSchedulePlan(count, config = {}) {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "postTweetAlarm") {
-    addLog('info', '定时器触发，准备执行发推');
+    addLog('info', 'post_timer_triggered');
     executeNextPost();
+  } else if (alarm.name === PERFORMANCE_REVIEW_ALARM) {
+    chrome.storage.local.get({ isRunning: false }, (res) => {
+      if (!res.isRunning) {
+        chrome.alarms.clear(PERFORMANCE_REVIEW_ALARM);
+        return;
+      }
+      addLog('info', 'auto_review_started');
+      reviewNextPendingPost();
+    });
   } else if (alarm.name === "autoShutdownAlarm") {
-    addLog('warn', '已达到单次最大连续工作时长 (10小时)，为保护账号安全，机器人已自动停止');
+    addLog('warn', 'max_work_time_reached');
     chrome.storage.local.set({ isRunning: false });
   }
 });
 
 async function executeNextPost() {
-  const result = await getStorage(['pendingPost', 'postsToday', 'lastPostDate', 'postsPerDay', 'isAutoPaused', 'isGenerating', 'onboardingStrategy']);
+  const result = await getStorage(['pendingPost', 'postsToday', 'lastPostDate', 'postsPerDay', 'isAutoPaused', 'isGenerating', 'isPosting', 'isPostingStartedAt', 'lastPostTriggerAt', 'onboardingStrategy', 'replyFlowLockUntil', 'isGeneratingReply', 'isReplyTyping', 'isTyping', 'pendingReply', 'replyFlowPhase', 'accountBio', 'aiPersona', 'isAnalyzingPersona']);
   if (!canAutoPublish(result)) {
     chrome.alarms.clear("postTweetAlarm");
     await setStorage({ nextPostTime: '自动发帖已关闭' });
@@ -617,12 +685,26 @@ async function executeNextPost() {
   }
 
   if (result.isAutoPaused) {
-    addLog('info', '自动操作已暂停，跳过本次发推执行');
+    addLog('info', 'automation_paused_skip_post');
     return;
   }
   
   if (result.isGenerating) {
-    addLog('info', '当前已有推文正在生成中，请耐心等待...');
+    addLog('info', 'post_generation_busy');
+    return;
+  }
+
+  if (isFreshPostingLock(result)) {
+    addLog('info', 'post_publish_busy');
+    return;
+  }
+
+  if (hasActiveReplyFlow(result)) {
+    // Posting and auto-reply share the same X tab/DOM. Don't fire a post send while a reply
+    // is mid-flight (generating/pending-intent/sending) — it can collide with the reply's
+    // compose dialog. Reply flow locks are short-lived (<=3min), so just retry shortly.
+    addLog('info', 'post_skipped_reply_flow_busy');
+    chrome.alarms.create("postTweetAlarm", { delayInMinutes: 0.5 });
     return;
   }
   
@@ -635,9 +717,20 @@ async function executeNextPost() {
   const todayStr = new Date().toDateString();
   const postsToday = result.lastPostDate === todayStr ? (result.postsToday || 0) : 0;
   if (postsToday >= postsPerDay) {
-    addLog('info', `今日已达发推上限 ${postsToday}/${postsPerDay}，跳过本次执行`);
+    addLog('info', 'daily_post_limit_reached', [postsToday, postsPerDay]);
     scheduleForTomorrow(new Date(), result);
     return;
+  }
+
+  // Self-heal: if the account still has a placeholder/weak persona (e.g. the
+  // one-time LLM analysis after connecting X never ran or failed silently -
+  // missing API key at connect time, a dropped request, etc.), kick off a
+  // real analysis in the background now. Don't await it or block this post -
+  // it just means this cycle still uses whatever persona is on file, and the
+  // next cycle gets a real one instead of staying stuck on the placeholder.
+  if (result.accountBio && !result.isAnalyzingPersona && isWeakAutoPersona(result.aiPersona || {})) {
+    addLog('info', 'persona_self_heal_triggered');
+    analyzeAccountPersona(result.accountBio);
   }
 
   try {
@@ -646,7 +739,7 @@ async function executeNextPost() {
     const formattedText = formatTweetForX(postText);
     
     if (!formattedText) {
-       addLog('warn', '生成的推文为空，已跳过本次发推');
+       addLog('warn', 'empty_generated_post');
        await setStorage({ isGenerating: false });
        checkAndSetupAlarm();
        return;
@@ -659,7 +752,7 @@ async function executeNextPost() {
       isGenerating: false
     });
     
-    addLog('info', `推文生成成功，正在执行发推...`);
+    addLog('info', 'post_generation_success');
     triggerPostInTab();
   } catch (err) {
     // Errors are logged inside generateSingleTweetDraft, just clear the lock and wait for next alarm.
@@ -673,27 +766,42 @@ function getIntentPostUrl(text) {
 }
 
 function triggerPostInTab() {
-  chrome.storage.local.get(['pendingPost'], (result) => {
+  chrome.storage.local.get(['pendingPost', 'isPosting', 'isPostingStartedAt', 'lastPostTriggerAt', 'replyFlowLockUntil', 'isGeneratingReply', 'isReplyTyping', 'isTyping', 'pendingReply', 'replyFlowPhase'], (result) => {
+    if (isFreshPostingLock(result)) {
+      addLog('info', 'post_publish_busy');
+      return;
+    }
+    if (hasActiveReplyFlow(result)) {
+      addLog('info', 'post_skipped_reply_flow_busy');
+      chrome.alarms.create("postTweetAlarm", { delayInMinutes: 0.5 });
+      return;
+    }
+    const now = Date.now();
+    if (now - Number(result.lastPostTriggerAt || 0) < POST_TRIGGER_COOLDOWN_MS) {
+      addLog('info', 'post_trigger_cooling_down');
+      return;
+    }
+    chrome.storage.local.set({ lastPostTriggerAt: now });
     const intentUrl = getIntentPostUrl(result.pendingPost || '');
     chrome.tabs.query({ url: ["*://*.x.com/*", "*://*.twitter.com/*"] }, (tabs) => {
       if (tabs.length > 0) {
         let tab = tabs.find(t => t.active) || tabs[0];
-        addLog('info', `向标签页 ${tab.id} 发送发推指令`);
+        addLog('info', 'send_post_command_to_tab', [tab.id]);
         chrome.tabs.sendMessage(tab.id, { action: "postNewTweet" }, () => {
           if (chrome.runtime.lastError) {
-            addLog('warn', `标签页未响应内容脚本，改开干净 intent/post 标签页: ${chrome.runtime.lastError.message}`);
+            addLog('warn', 'content_script_unresponsive_open_intent', [chrome.runtime.lastError.message]);
             chrome.tabs.create({ url: intentUrl, active: true });
           }
         });
       } else {
-        addLog('info', '未找到 X.com 标签页，新建 intent/post 标签页');
+        addLog('info', 'no_x_tab_open_intent');
         chrome.tabs.create({ url: intentUrl });
       }
     });
   });
 }
 
-function upsertAutoPostToVault({ id, text, source, publishedAt }) {
+function upsertAutoPostToVault({ id, text, source, publishedAt, postUrl, statusId }) {
   const normalizedText = formatTweetForX(text || '');
   if (!normalizedText) return Promise.resolve(false);
 
@@ -701,6 +809,7 @@ function upsertAutoPostToVault({ id, text, source, publishedAt }) {
     chrome.storage.local.get({ draftVault: [] }, (res) => {
       const vault = Array.isArray(res.draftVault) ? res.draftVault.slice(0, 100) : [];
       const stableId = id ? String(id) : `auto-${publishedAt || Date.now()}`;
+      const reviewSchedule = buildAutoReviewSchedule(publishedAt || Date.now());
       const existingIndex = vault.findIndex((item) => {
         if (item?.id && String(item.id) === stableId) return true;
         return item?.source === 'auto_generated' && formatTweetForX(item.text || '') === normalizedText;
@@ -713,12 +822,20 @@ function upsertAutoPostToVault({ id, text, source, publishedAt }) {
         originalAIOutput: existing?.originalAIOutput || normalizedText,
         source: POST_ORIGIN.AUTO_GENERATED,
         origin: POST_ORIGIN.AUTO_GENERATED,
+        contentMode: POST_CONTENT_MODE.POST,
         author: existing?.author || 'Auto Agent',
         authorName: existing?.authorName || 'Auto Agent',
         postSource: source || 'instant_gen',
         status: POST_STATUS.PUBLISHED,
+        postUrl: postUrl || existing?.postUrl || '',
+        statusId: statusId || existing?.statusId || '',
         savedAt: existing?.savedAt || publishedAt || Date.now(),
-        publishedAt: publishedAt || Date.now()
+        publishedAt: publishedAt || Date.now(),
+        autoReviewEnabled: true,
+        autoReviewAttempts: existing?.autoReviewAttempts || 0,
+        autoReviewSchedule: existing?.autoReviewSchedule || reviewSchedule,
+        nextAutoReviewAt: existing?.nextAutoReviewAt || reviewSchedule[0],
+        lastAutoReviewError: existing?.lastAutoReviewError || ''
       });
 
       if (existingIndex >= 0) {
@@ -728,64 +845,1237 @@ function upsertAutoPostToVault({ id, text, source, publishedAt }) {
       }
 
       chrome.storage.local.set({ draftVault: vault.slice(0, 100) }, () => {
-        addLog('success', '自动发布内容已写入 Posts，可回填表现用于 Loop 学习');
+        addLog('success', 'post_saved_to_posts');
+        schedulePerformanceReviewAlarm();
         resolve(true);
       });
     });
   });
 }
 
-function handlePostCompleted(source) {
-  chrome.storage.local.get(['postsToday', 'lastPostDate', 'sessionPostCount', 'pendingPost', 'pendingPostId', 'pendingPostSource'], (result) => {
-    const updates = {
-      pendingPost: null,
-      pendingPostId: null,
-      pendingPostSource: null,
-      pendingScheduledAt: null,
-      isAutoPaused: false,
-      pauseReason: ''
-    };
+function normalizeAuthorIdentity(value = '') {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
 
-    const finalize = (afterPersist) => {
-      const complete = () => {
-        if (afterPersist) {
-          afterPersist().finally(() => {
-            chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
-            checkAndSetupAlarm();
-            chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
-          });
+function isLikelyAuthorOnlySyncedText(text = '', user = {}) {
+  const normalizedText = normalizeAuthorIdentity(text);
+  if (!normalizedText) return false;
+  const candidates = [user.name, user.username, user.screenName, user.handle]
+    .map(normalizeAuthorIdentity)
+    .filter(Boolean);
+  return candidates.includes(normalizedText);
+}
+
+function buildSyncedXPostRecord(post = {}, user = {}, existing = null) {
+  const text = formatTweetForX(post.text || existing?.text || '');
+  const rawStatusId = String(post.statusId || '').trim();
+  const rawPostId = String(post.id || rawStatusId || '').trim();
+  const hasRealStatusId = /^\d+$/.test(rawStatusId);
+  const stableKey = hasRealStatusId ? rawStatusId : rawPostId;
+  if (!text || !stableKey || isLikelyAuthorOnlySyncedText(text, user)) return null;
+  const createdAt = Number(post.createdAt) || Number(existing?.createdAt) || Date.now();
+  const shouldReviewNow = Date.now() - createdAt >= POST_REVIEW_DELAY_MS;
+  const metrics = post.performanceMetrics || existing?.performanceMetrics || {};
+  const language = normalizeDetectedAccountLanguage(post.language || post.lang || existing?.language || '');
+  const views = shouldReviewNow ? (Number(post.actualViews || metrics.views || 0) || 0) : 0;
+  const finalMetrics = {
+    ...(existing?.performanceMetrics || {}),
+    ...(shouldReviewNow ? metrics : {})
+  };
+  if (!views && Number(existing?.performanceMetrics?.views || 0) > 0) {
+    finalMetrics.views = Number(existing.performanceMetrics.views) || 0;
+  }
+  const alreadyReviewed = Boolean(existing?.xLearningRecordedAt || existing?.status === POST_STATUS.REVIEWED);
+  const canAutoReview = hasRealStatusId || Boolean(post.postUrl);
+  const reviewSchedule = existing?.autoReviewSchedule || buildAutoReviewSchedule(createdAt);
+  const nextReviewAt = alreadyReviewed
+    ? 0
+    : Number(existing?.nextAutoReviewAt || 0) || reviewSchedule[0];
+  return normalizePostRecord({
+    ...(existing || {}),
+    id: existing?.id || (hasRealStatusId ? `x-${rawStatusId}` : `x-scan-${stableKey.slice(0, 80)}`),
+    text: existing?.text || text,
+    originalAIOutput: existing?.originalAIOutput || text,
+    source: POST_ORIGIN.X_SYNCED,
+    origin: existing?.origin || POST_ORIGIN.X_SYNCED,
+    contentMode: post.contentMode || existing?.contentMode || POST_CONTENT_MODE.POST,
+    author: user.username ? `@${user.username}` : existing?.author || 'X',
+    authorName: user.name || existing?.authorName || user.username || 'X',
+    postSource: post.postSource || existing?.postSource || 'profile_scan',
+    status: alreadyReviewed || views > 0 ? POST_STATUS.REVIEWED : POST_STATUS.PUBLISHED,
+    postUrl: post.postUrl || existing?.postUrl || (hasRealStatusId && user.username ? `https://x.com/${user.username}/status/${rawStatusId}` : ''),
+    statusId: hasRealStatusId ? rawStatusId : existing?.statusId || '',
+    savedAt: existing?.savedAt || createdAt,
+    publishedAt: existing?.publishedAt || createdAt,
+    createdAt,
+    actualViews: views || existing?.actualViews || 0,
+    performanceMetrics: finalMetrics,
+    language: language || existing?.language || '',
+    reviewedAt: alreadyReviewed ? existing?.reviewedAt || 0 : (views > 0 ? Date.now() : existing?.reviewedAt || 0),
+    autoReviewEnabled: !alreadyReviewed && canAutoReview,
+    autoReviewAttempts: existing?.autoReviewAttempts || 0,
+    autoReviewSchedule: reviewSchedule,
+    nextAutoReviewAt: canAutoReview ? nextReviewAt : 0,
+    learningDisabled: Boolean(existing?.learningDisabled),
+    learningDisabledAt: existing?.learningDisabledAt || 0,
+    lastSyncedAt: Date.now(),
+    syncedFromX: true
+  });
+}
+
+function mergeSyncedXPostsIntoVault(vault = [], posts = [], user = {}, options = {}) {
+  const normalizedVault = (Array.isArray(vault) ? vault : []).slice(0, 100).map(normalizePostRecord);
+  const hiddenKeys = new Set((Array.isArray(options.hiddenXPostKeys) ? options.hiddenXPostKeys : []).map(String));
+  const nextVault = options.replaceProfileScan
+    ? normalizedVault.filter((item) => {
+      const isProfileScan = item.origin === POST_ORIGIN.X_SYNCED
+        && (item.postSource === 'profile_scan' || item.lastSyncedFrom === 'profile_scan' || item.syncedFromX);
+      return !isProfileScan;
+    })
+    : normalizedVault;
+  let added = 0;
+  let updated = 0;
+  let reviewedAdded = 0;
+  const reviewedPostsForLearning = [];
+
+  posts.forEach((post) => {
+    const rawStatusId = String(post?.statusId || '').trim();
+    const rawPostId = String(post?.id || rawStatusId || '').trim();
+    const hasRealStatusId = /^\d+$/.test(rawStatusId);
+    const stableKey = hasRealStatusId ? rawStatusId : rawPostId;
+    if (!stableKey) return;
+    const idKey = hasRealStatusId ? `x-${rawStatusId}` : `x-scan-${stableKey.slice(0, 80)}`;
+    if (hiddenKeys.has(stableKey) || hiddenKeys.has(idKey) || hiddenKeys.has(rawStatusId)) return;
+    const existingIndex = nextVault.findIndex((item) => {
+      if (hasRealStatusId && String(item.statusId || '') === rawStatusId) return true;
+      return String(item.id || '') === idKey;
+    });
+    const existing = existingIndex >= 0 ? nextVault[existingIndex] : null;
+    const hadLoopLearning = Boolean(existing?.xLearningRecordedAt || existing?.status === POST_STATUS.REVIEWED);
+    let record = buildSyncedXPostRecord(post, user, existing);
+    if (!record) return;
+    if (options.postSource) {
+      record = normalizePostRecord({
+        ...record,
+        postSource: options.postSource,
+        lastSyncedFrom: options.postSource
+      });
+    }
+    const metrics = record.performanceMetrics || {};
+    const isMature = Date.now() - Number(record.publishedAt || record.createdAt || 0) >= POST_REVIEW_DELAY_MS;
+    const hasViews = isMature && Number(record.actualViews || metrics.views || 0) > 0;
+    if (hasViews) {
+      const reviewed = applyPerformanceReview(record, metrics, nextVault);
+      if (reviewed?.post) {
+        record = normalizePostRecord({
+          ...reviewed.post,
+          syncedFromX: true,
+          lastSyncedAt: Date.now(),
+          xLearningRecordedAt: existing?.xLearningRecordedAt || 0
+        });
+      }
+    }
+
+    if (existingIndex >= 0) {
+      nextVault[existingIndex] = record;
+      updated += 1;
+    } else {
+      nextVault.unshift(record);
+      added += 1;
+    }
+
+    if (hasViews && !hadLoopLearning && !record.learningDisabled) {
+      const learnedAt = Date.now();
+      record = normalizePostRecord({
+        ...record,
+        xLearningRecordedAt: learnedAt
+      });
+      if (existingIndex >= 0) {
+        nextVault[existingIndex] = record;
+      } else {
+        nextVault[0] = record;
+      }
+      reviewedPostsForLearning.push(record);
+      reviewedAdded += 1;
+    }
+  });
+
+  nextVault.sort((a, b) => Number(b.publishedAt || b.savedAt || 0) - Number(a.publishedAt || a.savedAt || 0));
+  return {
+    vault: nextVault.slice(0, 100),
+    added,
+    updated,
+    reviewedAdded,
+    reviewedPostsForLearning
+  };
+}
+
+function getMergeLearningSummary(merged = {}) {
+  return {
+    added: Number(merged.added || 0),
+    updated: Number(merged.updated || 0),
+    reviewedAdded: Number(merged.reviewedAdded || 0)
+  };
+}
+
+function getXSyncStatusPatch(status, details = {}, previous = {}) {
+  const previousProfileEnrichedAt = Number(previous?.profileEnrichedAt || 0) || 0;
+  const next = {
+    ...(previousProfileEnrichedAt ? { profileEnrichedAt: previousProfileEnrichedAt } : {}),
+    status,
+    updatedAt: Date.now(),
+    ...details
+  };
+  return {
+    xDataSyncStatus: next
+  };
+}
+
+function setXSyncStatus(status, details = {}) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['xDataSyncStatus'], (res) => {
+      chrome.storage.local.set(getXSyncStatusPatch(status, details, res.xDataSyncStatus || {}), () => {
+        resolve();
+      });
+    });
+  });
+}
+
+function getPostMetricValue(post = {}, metricName = 'views') {
+  const metrics = post.performanceMetrics || {};
+  if (metricName === 'views') {
+    return Number(post.actualViews || metrics.views || 0) || 0;
+  }
+  return Number(metrics[metricName] || 0) || 0;
+}
+
+function getTopPerformanceSamples(posts = [], limit = 6) {
+  const candidates = (Array.isArray(posts) ? posts : [])
+    .filter(post => post?.text)
+    .filter(post => getPostMetricValue(post, 'views') > 0 || getPostMetricValue(post, 'likes') > 0);
+  const sortBy = (metricName, mode = '') => candidates
+    .filter(post => !mode || post.contentMode === mode)
+    .slice()
+    .sort((a, b) => {
+      const metricDiff = getPostMetricValue(b, metricName) - getPostMetricValue(a, metricName);
+      if (metricDiff) return metricDiff;
+      return getPostMetricValue(b, 'views') - getPostMetricValue(a, 'views');
+    })
+    .slice(0, limit);
+  return {
+    topByViews: sortBy('views'),
+    topByLikes: sortBy('likes'),
+    topPostsByViews: sortBy('views', POST_CONTENT_MODE.POST),
+    topPostsByLikes: sortBy('likes', POST_CONTENT_MODE.POST),
+    topRepliesByViews: sortBy('views', POST_CONTENT_MODE.REPLY),
+    topRepliesByLikes: sortBy('likes', POST_CONTENT_MODE.REPLY)
+  };
+}
+
+function getPostEngagementScore(post = {}) {
+  const metrics = post.performanceMetrics || {};
+  return (
+    getPostMetricValue(post, 'views')
+    + (Number(metrics.likes) || 0) * 80
+    + (Number(metrics.reposts) || 0) * 180
+    + (Number(metrics.replies) || 0) * 120
+  );
+}
+
+function normalizeStyleSampleText(text = '') {
+  return formatTweetForX(String(text || '').replace(/https?:\/\/\S+/gi, '').trim());
+}
+
+function buildPerformanceBaselinePayload(posts = [], extra = {}) {
+  const baseline = buildAccountPerformanceBaseline(posts);
+  const samples = getTopPerformanceSamples(posts, 6);
+  const topPosts = posts
+    .filter(item => getPostMetricValue(item, 'views') > 0)
+    .slice()
+    .sort((a, b) => getPostMetricValue(b, 'views') - getPostMetricValue(a, 'views'))
+    .slice(0, 24);
+  return {
+    ...baseline,
+    ...extra,
+    sampledCount: Number(extra.sampledCount || extra.count || posts.length || topPosts.length),
+    topPosts,
+    ...samples
+  };
+}
+
+async function saveScannedXPostsToVault(posts = [], scanMeta = {}) {
+  const items = await getStorage(['draftVault', 'aiMemory', 'accountPerformanceBaseline', 'xAuth', 'engineLanguage', 'onboardingStrategy', 'aiPersona', 'xDataSyncStatus', 'hiddenXPostKeys']);
+  const auth = normalizeXAuth(items.xAuth || {});
+  const user = auth.user || {};
+  const handle = scanMeta.handle || user.username || '';
+  const sourcePosts = Array.isArray(posts) ? posts : [];
+  const merged = mergeSyncedXPostsIntoVault(items.draftVault || [], sourcePosts, {
+    ...user,
+    username: handle || user.username || ''
+  }, {
+    postSource: scanMeta.source || 'profile_scan',
+    hiddenXPostKeys: items.hiddenXPostKeys || []
+  });
+  let aiMemory = items.aiMemory || {};
+  merged.reviewedPostsForLearning.forEach((post) => {
+    aiMemory = updateAiMemoryWithReviewedPost(aiMemory, post);
+  });
+  const languageSignal = inferDominantAccountLanguage(sourcePosts);
+  const detectedLanguage = languageSignal.language || '';
+  const currentEngineLanguage = String(items.engineLanguage || 'auto').trim() || 'auto';
+  const shouldApplyDetectedLanguage = Boolean(detectedLanguage && currentEngineLanguage === 'auto');
+  const nextOnboardingStrategy = shouldApplyDetectedLanguage
+    ? {
+      ...(items.onboardingStrategy || {}),
+      preferredLanguage: toPreferredLanguage(detectedLanguage, globalThis.navigator?.language || '')
+    }
+    : items.onboardingStrategy;
+  const localizedPersona = shouldApplyDetectedLanguage
+    ? localizeAutoPersona(
+      items.aiPersona || {},
+      user,
+      detectedLanguage,
+      globalThis.navigator?.language || '',
+      detectedLanguage
+    )
+    : { persona: items.aiPersona || {}, changed: false };
+
+  const baselinePayload = buildPerformanceBaselinePayload(merged.vault, {
+    handle,
+    sampledCount: scanMeta.sampledCount || scanMeta.count || sourcePosts.length,
+    updatedBy: scanMeta.updatedBy || scanMeta.source || 'profile_scan',
+    detectedLanguage,
+    languageConfidence: languageSignal.confidence || 0,
+    languageSampleCount: languageSignal.sampleCount || 0,
+    languageCounts: languageSignal.counts || {}
+  });
+
+  const updates = {
+    draftVault: merged.vault,
+    aiMemory,
+    ...getXSyncStatusPatch(scanMeta.status || 'page_scan', {
+      source: scanMeta.source || 'profile_scan',
+      count: sourcePosts.length,
+      sampledCount: scanMeta.sampledCount || scanMeta.count || sourcePosts.length,
+      candidateCount: sourcePosts.length,
+      error: scanMeta.error || '',
+      learned: getMergeLearningSummary(merged),
+      detectedLanguage,
+      languageConfidence: languageSignal.confidence || 0,
+      languageSampleCount: languageSignal.sampleCount || 0,
+      languageCounts: languageSignal.counts || {}
+    }, items.xDataSyncStatus || {}),
+    accountPerformanceBaseline: {
+      ...(items.accountPerformanceBaseline || {}),
+      ...baselinePayload
+    }
+  };
+
+  if (detectedLanguage) {
+    updates.accountLanguage = detectedLanguage;
+    updates.accountLanguageConfidence = languageSignal.confidence || 0;
+    updates.accountLanguageDetectedAt = Date.now();
+  }
+  if (shouldApplyDetectedLanguage) {
+    updates.engineLanguage = detectedLanguage;
+    updates.onboardingStrategy = nextOnboardingStrategy;
+    if (localizedPersona.changed) updates.aiPersona = localizedPersona.persona;
+  }
+  if (scanMeta.enrichProfile) {
+    updates.xDataSyncStatus = {
+      ...(updates.xDataSyncStatus || {}),
+      profileEnrichedAt: Date.now()
+    };
+  }
+
+  await setStorage(updates);
+  if (scanMeta.enrichProfile) {
+    addLog('success', 'profile_context_synced');
+  }
+  if (shouldApplyDetectedLanguage) {
+    addLog('info', 'account_language_detected', [
+      detectedLanguage,
+      Math.round((languageSignal.confidence || 0) * 100)
+    ]);
+  }
+
+  schedulePerformanceReviewAlarm();
+  return merged;
+}
+
+function normalizeProfileUserFromScan(profile = {}, fallbackUser = {}) {
+  const username = String(profile.username || profile.handle || fallbackUser.username || '').replace(/^@/, '').trim();
+  const name = String(profile.name || fallbackUser.name || '').trim();
+  const description = String(profile.description || fallbackUser.description || '').trim();
+  const profileImageUrl = String(profile.profile_image_url || profile.avatarUrl || fallbackUser.profile_image_url || '').trim();
+  if (!username && !name && !description && !profileImageUrl) return fallbackUser || null;
+  return {
+    ...(fallbackUser || {}),
+    id: fallbackUser?.id || username || '',
+    name,
+    username,
+    description,
+    profile_image_url: profileImageUrl,
+    public_metrics: {
+      ...(fallbackUser?.public_metrics || {}),
+      followers_count: Number(profile.followersCount ?? fallbackUser?.public_metrics?.followers_count) || 0,
+      following_count: Number(profile.followingCount ?? fallbackUser?.public_metrics?.following_count) || 0,
+      tweet_count: Number(profile.postCount ?? fallbackUser?.public_metrics?.tweet_count) || 0
+    },
+    source: profile.source || fallbackUser?.source || 'profile_scan'
+  };
+}
+
+async function mergeProfileScanIntoAuth(profile = {}) {
+  const { xAuth } = await getStorage(['xAuth']);
+  const auth = normalizeXAuth(xAuth || {});
+  if (!auth.accessToken) return auth;
+  const user = normalizeProfileUserFromScan(profile, auth.user || {});
+  const nextAuth = {
+    ...auth,
+    user,
+    profileScannedAt: Date.now()
+  };
+  await setStorage({ xAuth: nextAuth });
+  return nextAuth;
+}
+
+function schedulePerformanceReviewAlarm() {
+  chrome.storage.local.get({ draftVault: [], isRunning: false }, (res) => {
+    if (!res.isRunning) {
+      chrome.alarms.clear(PERFORMANCE_REVIEW_ALARM);
+      return;
+    }
+    const now = Date.now();
+    const nextPost = (Array.isArray(res.draftVault) ? res.draftVault : [])
+      .filter(item => item?.autoReviewEnabled && item.status !== POST_STATUS.REVIEWED && Number(item.nextAutoReviewAt) > 0)
+      .sort((a, b) => Number(a.nextAutoReviewAt) - Number(b.nextAutoReviewAt))[0];
+
+    if (!nextPost) {
+      chrome.alarms.clear(PERFORMANCE_REVIEW_ALARM);
+      return;
+    }
+
+    chrome.alarms.create(PERFORMANCE_REVIEW_ALARM, {
+      when: Math.max(now + 60 * 1000, Number(nextPost.nextAutoReviewAt))
+    });
+  });
+}
+
+function repairPendingPerformanceReviews() {
+  chrome.storage.local.get({ draftVault: [] }, (res) => {
+    const vault = Array.isArray(res.draftVault) ? res.draftVault.slice(0, 100).map(normalizePostRecord) : [];
+    let changed = false;
+    const repaired = vault.map((item) => {
+      if (!shouldRepairAutoReview(item)) return item;
+      changed = true;
+      return normalizePostRecord(repairAutoReviewRecord(item));
+    });
+    if (!changed) return;
+    chrome.storage.local.set({ draftVault: repaired }, () => {
+      schedulePerformanceReviewAlarm();
+    });
+  });
+}
+
+async function connectXAccount(clientId) {
+  let auth = null;
+  try {
+    const previous = await getStorage(['xDataSyncStatus']);
+    const preview = await getXOAuthRequestPreview(clientId);
+    addLog('info', 'x_oauth_request', [
+      preview.clientId,
+      preview.redirectUri,
+      preview.scope,
+      preview.flow,
+      preview.codeChallengeMethod,
+      preview.fallbackRedirectUri || 'none'
+    ]);
+    auth = await connectXWithOAuth(clientId);
+    await setStorage({
+      xAuth: auth,
+      ...getXSyncStatusPatch('syncing', {
+        source: 'x_connect',
+        count: 0,
+        sampledCount: 0,
+        error: ''
+      }, previous.xDataSyncStatus || {})
+    });
+    addLog('success', auth.user?.username ? 'x_connected_with_handle' : 'x_connected', [auth.user?.username || '']);
+  } catch (error) {
+    addLog('error', 'x_connect_failed', [error.message || String(error)]);
+    throw error;
+  }
+
+  runInitialBaselineScan({ force: true });
+  schedulePerformanceReviewAlarm();
+  return {
+    success: true,
+    user: auth.user
+  };
+}
+
+async function disconnectXAccount() {
+  await setStorage({ xAuth: normalizeXAuth({}), xDataSyncStatus: {} });
+  addLog('info', 'x_disconnected');
+  return { success: true };
+}
+
+async function syncConnectedXData(options = {}) {
+  const { xAuth, xDataSyncStatus } = await getStorage(['xAuth', 'xDataSyncStatus']);
+  const auth = normalizeXAuth(xAuth || {});
+  if (!auth.accessToken) {
+    throw new Error('X is not connected');
+  }
+  if (!options.enrichProfile || options.updateProfileFromSamples || options.skipAutoPersonaAnalysis) {
+    await setStorage({ profileAutoAnalyzeBlockedUntil: Date.now() + 2 * 60 * 1000 });
+  }
+  await setStorage(getXSyncStatusPatch('syncing', {
+    source: 'profile_scan',
+    count: 0,
+    sampledCount: 0,
+    error: ''
+  }, xDataSyncStatus || {}));
+  runInitialBaselineScan({
+    force: true,
+    enrichProfile: Boolean(options.enrichProfile),
+    updateProfileFromSamples: Boolean(options.updateProfileFromSamples),
+    skipAutoPersonaAnalysis: Boolean(options.skipAutoPersonaAnalysis),
+    openVisible: Boolean(options.openVisible),
+    openCreatorCenter: Boolean(options.openCreatorCenter)
+  });
+  schedulePerformanceReviewAlarm();
+  return {
+    success: true,
+    user: auth.user || null,
+    source: 'profile_scan',
+    enrichProfile: Boolean(options.enrichProfile),
+    updateProfileFromSamples: Boolean(options.updateProfileFromSamples)
+  };
+}
+
+function getReviewTargetUrl(item = {}) {
+  if (item.postUrl) return item.postUrl;
+  if (item.statusId && item.author) return `https://x.com/${String(item.author).replace(/^@/, '')}/status/${item.statusId}`;
+  return '';
+}
+
+function normalizeXHandle(value = '') {
+  const handle = String(value || '').replace(/^@/, '').trim();
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) return '';
+  if (['auto', 'agent', 'autoagent', 'x', 'unknown', '未知用户'].includes(handle.toLowerCase())) return '';
+  return handle;
+}
+
+function addUniqueUrl(urls, url) {
+  const clean = String(url || '').trim();
+  if (clean && !urls.includes(clean)) urls.push(clean);
+}
+
+function getPostSearchSnippet(text = '') {
+  const firstLine = String(text || '')
+    .split('\n')
+    .map(line => line.trim())
+    .find(Boolean) || '';
+  return firstLine
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/["“”]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 90);
+}
+
+async function getReviewTargetUrls(item = {}) {
+  const urls = [];
+  addUniqueUrl(urls, item.postUrl);
+  const itemAuthor = normalizeXHandle(item.author);
+  if (item.statusId && itemAuthor) {
+    addUniqueUrl(urls, `https://x.com/${itemAuthor}/status/${item.statusId}`);
+  }
+
+  const { xAuth, accountBio } = await getStorage(['xAuth', 'accountBio']);
+  const auth = normalizeXAuth(xAuth || {});
+  const connectedHandle = normalizeXHandle(auth.user?.username);
+  const bioHandle = normalizeXHandle(
+    String(accountBio || '').match(/(?:x\.com\/|twitter\.com\/|@)([A-Za-z0-9_]{1,15})/)?.[1] || ''
+  );
+  const handle = itemAuthor || connectedHandle || bioHandle;
+  const snippet = getPostSearchSnippet(item.text);
+
+  if (handle && snippet) {
+    const searchQuery = `from:${handle} "${snippet}" -filter:replies -filter:retweets`;
+    addUniqueUrl(urls, `https://x.com/search?q=${encodeURIComponent(searchQuery)}&src=typed_query&f=live`);
+    addUniqueUrl(urls, `https://x.com/search?q=${encodeURIComponent(searchQuery)}&src=typed_query&f=top`);
+  }
+  if (handle) addUniqueUrl(urls, `https://x.com/${handle}`);
+  addUniqueUrl(urls, getReviewTargetUrl(item));
+  addUniqueUrl(urls, 'https://x.com/home');
+  return urls;
+}
+
+function requestPerformanceSnapshot(tabId, item) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, {
+      action: 'readPostPerformance',
+      postId: item.id,
+      statusId: item.statusId || '',
+      postText: item.text || '',
+      author: item.author || ''
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response || { success: false, error: 'empty response' });
+    });
+  });
+}
+
+function isMissingReceivingEndError(message = '') {
+  return /receiving end does not exist|could not establish connection|message channel closed/i.test(String(message || ''));
+}
+
+function waitForTabLoadComplete(tabId, timeoutMs = 12000) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const check = () => {
+      chrome.tabs.get(tabId, (tab) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
           return;
         }
-        chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
+        if (tab?.status === 'complete') {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          resolve(false);
+          return;
+        }
+        setTimeout(check, 500);
+      });
+    };
+    check();
+  });
+}
+
+function injectXContentScripts(tabId) {
+  return new Promise((resolve) => {
+    chrome.scripting.executeScript({
+      target: { tabId },
+      files: [
+        'core/automationState.js',
+        'content/logic/evaluator.js',
+        'content/x_scraper.js'
+      ]
+    }, () => {
+      const error = chrome.runtime.lastError?.message || '';
+      resolve({ success: !error || /already been declared|Cannot create item with duplicate id/i.test(error), error });
+    });
+  });
+}
+
+async function requestPerformanceSnapshotWithInjection(tabId, item) {
+  let response = await requestPerformanceSnapshot(tabId, item);
+  if (!isMissingReceivingEndError(response?.error)) return response;
+  await waitForTabLoadComplete(tabId);
+  const injection = await injectXContentScripts(tabId);
+  await new Promise(resolve => setTimeout(resolve, 800));
+  response = await requestPerformanceSnapshot(tabId, item);
+  if (response?.success || !isMissingReceivingEndError(response?.error)) return response;
+  return {
+    ...response,
+    error: injection.error
+      ? `${response.error}; injection: ${injection.error}`
+      : response.error
+  };
+}
+
+function requestProfileBaselineSnapshot(tabId, limit = 30) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, {
+      action: 'scanProfilePerformanceBaseline',
+      limit
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response || { success: false, error: 'empty response' });
+    });
+  });
+}
+
+function scrollTabForBaselineScan(tabId) {
+  return new Promise((resolve) => {
+    chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        window.scrollBy({ top: Math.max(window.innerHeight * 1.25, 900), behavior: 'smooth' });
+      }
+    }, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    });
+  });
+}
+
+function markAutomationSystemNavigation() {
+  chrome.storage.local.set({ botNavigationTime: Date.now() });
+}
+
+function getProfileUrlForBaselineScan(callback) {
+  chrome.tabs.query({ url: ["*://*.x.com/*", "*://*.twitter.com/*"] }, (tabs) => {
+    chrome.storage.local.get(['xAuth'], (res) => {
+      const connectedHandle = String(res.xAuth?.user?.username || '').replace(/^@/, '').toLowerCase();
+      const isProfileTab = (tab, requiredHandle = '') => {
+        try {
+          const url = new URL(tab.url || '');
+          const first = url.pathname.split('/').filter(Boolean)[0] || '';
+          if (!/^[A-Za-z0-9_]{1,15}$/.test(first)) return false;
+          if (['home', 'explore', 'notifications', 'messages', 'settings', 'search', 'compose', 'intent', 'login', 'logout', 'oauth', 'share', 'i'].includes(first.toLowerCase())) return false;
+          return !requiredHandle || first.toLowerCase() === requiredHandle;
+        } catch (_) {
+          return false;
+        }
+      };
+      const connectedProfileTab = connectedHandle ? tabs.find(tab => isProfileTab(tab, connectedHandle)) : null;
+      if (connectedProfileTab?.url) {
+        callback(connectedProfileTab.url);
+        return;
+      }
+      if (connectedHandle) {
+        callback(`https://x.com/${connectedHandle}`);
+        return;
+      }
+      const profileTab = tabs.find(tab => isProfileTab(tab));
+      if (profileTab?.url) {
+        callback(profileTab.url);
+        return;
+      }
+      callback('https://x.com/home');
+    });
+  });
+}
+
+function requestCreatorCenterSnapshot(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, { action: 'scanCreatorCenterSnapshot' }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response || { success: false, error: 'empty response' });
+    });
+  });
+}
+
+function collectCreatorCenterSnapshotForProfileSync() {
+  return new Promise((resolve) => {
+    markAutomationSystemNavigation();
+    chrome.tabs.create({ url: 'https://x.com/i/creator_center', active: false }, async (tab) => {
+      if (!tab?.id) {
+        resolve(null);
+        return;
+      }
+      addLog('info', 'creator_center_opened');
+      await waitForTabLoadComplete(tab.id);
+      await new Promise(done => setTimeout(done, 2500));
+      let response = await requestCreatorCenterSnapshot(tab.id);
+      if (!response?.success && isMissingReceivingEndError(response?.error)) {
+        await injectXContentScripts(tab.id);
+        await new Promise(done => setTimeout(done, 1000));
+        response = await requestCreatorCenterSnapshot(tab.id);
+      }
+      if (response?.success && response.text) {
+        await setStorage({
+          creatorCenterSnapshot: {
+            url: response.url || '',
+            text: response.text,
+            capturedAt: response.capturedAt || Date.now()
+          }
+        });
+        addLog('success', 'creator_center_synced');
+      }
+      resolve(response || null);
+    });
+  });
+}
+
+function runPageBaselineScan(options = {}) {
+  getProfileUrlForBaselineScan((url) => {
+    markAutomationSystemNavigation();
+    chrome.tabs.create({ url, active: Boolean(options.openVisible) }, (tab) => {
+      if (!tab?.id) return;
+      const startedAt = Date.now();
+      const scanReadLimit = options.enrichProfile ? 30 : 60;
+      const targetCandidateCount = options.enrichProfile ? 18 : 24;
+      let bestResponse = null;
+      let attempts = 0;
+      const tryRead = () => {
+        attempts += 1;
+        requestProfileBaselineSnapshot(tab.id, scanReadLimit).then((response) => {
+          const hasPosts = response?.success && Array.isArray(response.posts) && response.posts.length > 0;
+          const hasProfile = response?.success && Boolean(response.profile?.username || response.profile?.handle || response.handle);
+          if (hasPosts || hasProfile) {
+            const responseCandidateCount = Number(response.sampledCount || response.count || 0);
+            const bestCandidateCount = Number(bestResponse?.sampledCount || bestResponse?.count || 0);
+            const responseTopScore = getPostEngagementScore(response.posts?.[0] || {});
+            const bestTopScore = getPostEngagementScore(bestResponse?.posts?.[0] || {});
+            if (
+              !bestResponse
+              || responseCandidateCount > bestCandidateCount
+              || (responseCandidateCount === bestCandidateCount && responseTopScore > bestTopScore)
+            ) {
+              bestResponse = response;
+            }
+          }
+          const availableCandidates = Number(bestResponse?.sampledCount || bestResponse?.count || 0);
+          const enoughSamples = availableCandidates >= targetCandidateCount;
+          const enoughAttempts = attempts >= (options.enrichProfile ? 7 : 10);
+          const timedOut = Date.now() - startedAt > 60000;
+          if (bestResponse && (enoughSamples || enoughAttempts || timedOut)) {
+            const responseToSave = bestResponse;
+            const posts = Array.isArray(responseToSave.posts) ? responseToSave.posts : [];
+            const profile = {
+              ...(responseToSave.profile || {}),
+              username: responseToSave.profile?.username || responseToSave.profile?.handle || responseToSave.handle || ''
+            };
+            mergeProfileScanIntoAuth(profile)
+              .then((nextAuth) => {
+                if (nextAuth?.user?.username) {
+                  return seedProfileFromXAuth(nextAuth, {
+                    seedPersona: !options.updateProfileFromSamples && !options.skipAutoPersonaAnalysis
+                  });
+                }
+                return null;
+              })
+              .then(() => saveScannedXPostsToVault(posts, {
+                handle: responseToSave.handle || profile.username || profile.handle || '',
+                sampledCount: responseToSave.sampledCount || responseToSave.count || posts.length,
+                count: responseToSave.count || posts.length,
+                source: 'profile_scan',
+                status: posts.length > 0 ? 'page_scan' : 'profile_only',
+                updatedBy: 'profile_scan',
+                enrichProfile: Boolean(options.enrichProfile)
+              }))
+              .then((merged) => {
+                const creatorSnapshot = options.openCreatorCenter
+                  ? collectCreatorCenterSnapshotForProfileSync()
+                  : Promise.resolve(null);
+                const analysis = creatorSnapshot.then(() => {
+                  if (options.updateProfileFromSamples) {
+                    return updateProfileFromSamples({ softFail: true, skipBlock: true });
+                  }
+                  if (options.enrichProfile) return enrichProfileFromScannedData();
+                  if (options.skipAutoPersonaAnalysis) return null;
+                  return analyzeSeededProfileIfUseful();
+                });
+                return Promise.resolve(analysis).then(() => merged);
+              })
+              .then((merged) => {
+                if (posts.length > 0) addLog('success', 'baseline_scan_saved', [responseToSave.count || posts.length]);
+                const learned = Number(merged?.reviewedAdded || 0);
+                if (learned > 0) addLog('success', 'x_scan_posts_learned', [learned]);
+              })
+              .catch((error) => {
+                addLog('warn', 'baseline_scan_save_failed', [error.message || String(error)]);
+                setXSyncStatus('unavailable', {
+                  source: 'profile_scan',
+                  error: error.message || String(error)
+                });
+              })
+              .finally(() => {
+                if (!options.openVisible) {
+                  try { chrome.tabs.remove(tab.id); } catch (_) {}
+                }
+              });
+            return;
+          }
+          if (hasPosts || hasProfile) {
+            scrollTabForBaselineScan(tab.id).then(() => setTimeout(tryRead, 1800));
+            return;
+          }
+          if (timedOut) {
+            setXSyncStatus('unavailable', {
+              source: 'profile_scan',
+              error: 'profile scan timed out'
+            });
+            try { chrome.tabs.remove(tab.id); } catch (_) {}
+            return;
+          }
+          scrollTabForBaselineScan(tab.id).then(() => setTimeout(tryRead, 1800));
+        });
+      };
+      setTimeout(tryRead, 3500);
+    });
+  });
+}
+
+function buildXAccountBio(user = {}) {
+  const lines = [];
+  const handle = user.username ? `@${user.username}` : '';
+  const displayName = user.name || '';
+  const identity = [displayName, handle].filter(Boolean).join(' ');
+  if (identity) lines.push(identity);
+  if (user.description) lines.push(user.description);
+  const metrics = user.public_metrics || {};
+  const followerCount = Number(metrics.followers_count) || 0;
+  const followingCount = Number(metrics.following_count) || 0;
+  const tweetCount = Number(metrics.tweet_count) || 0;
+  const metricParts = [];
+  if (followerCount) metricParts.push(`${followerCount} followers`);
+  if (followingCount) metricParts.push(`${followingCount} following`);
+  if (tweetCount) metricParts.push(`${tweetCount} posts`);
+  if (metricParts.length) lines.push(metricParts.join(', '));
+  return lines.join('\n').trim();
+}
+
+function buildInitialPersonaFromXUser(user = {}, currentPersona = {}, lang = 'en', options = {}, accountLanguage = '') {
+  return buildInitialAutoPersona(user, currentPersona, lang, options, globalThis.navigator?.language || '', accountLanguage);
+}
+
+function isWeakAutoPersona(persona = {}) {
+  const characteristics = String(persona.characteristics || '').trim();
+  const goals = String(persona.goals || '').trim();
+  if (!characteristics && !goals) return true;
+  const combined = `${characteristics}\n${goals}`;
+  if (combined.length < 220) return true;
+  const lineCount = combined.split('\n').filter(line => line.trim()).length;
+  return lineCount < 5;
+}
+
+async function seedProfileFromXAuth(auth = {}, options = {}) {
+  const user = auth.user || {};
+  if (!user.id) return;
+  const existing = await getStorage(['accountBio', 'aiPersona', 'engineLanguage', 'accountLanguage']);
+  const lang = existing.engineLanguage || 'auto';
+  const accountBio = String(existing.accountBio || '').trim();
+  const updates = {};
+  if (!accountBio) {
+    const nextBio = buildXAccountBio(user);
+    if (nextBio) updates.accountBio = nextBio;
+  }
+  const aiPersona = existing.aiPersona || {};
+  if (options.seedPersona !== false && isWeakAutoPersona(aiPersona)) {
+    updates.aiPersona = buildInitialPersonaFromXUser(user, aiPersona, lang, { replaceExisting: true }, existing.accountLanguage || '');
+  }
+  if (Object.keys(updates).length > 0) {
+    await setStorage(updates);
+    addLog('success', 'x_profile_seeded', [user.username || '']);
+  }
+}
+
+async function syncAutoPersonaLanguage(engineLanguage = 'auto') {
+  const existing = await getStorage(['aiPersona', 'xAuth', 'accountLanguage']);
+  const { persona, changed } = localizeAutoPersona(
+    existing.aiPersona || {},
+    existing.xAuth?.user || {},
+    engineLanguage,
+    globalThis.navigator?.language || '',
+    existing.accountLanguage || ''
+  );
+  if (!changed) return;
+  await setStorage({ aiPersona: persona });
+  addLog('info', 'persona_language_synced');
+}
+
+async function analyzeSeededProfileIfUseful() {
+  const { accountBio, aiPersona, isAnalyzingPersona } = await getStorage(['accountBio', 'aiPersona', 'isAnalyzingPersona']);
+  if (!accountBio || isAnalyzingPersona || !isWeakAutoPersona(aiPersona || {})) return;
+  analyzeAccountPersona(accountBio);
+}
+
+async function enrichProfileFromScannedData() {
+  const { accountBio, xAuth } = await getStorage(['accountBio', 'xAuth']);
+  const auth = normalizeXAuth(xAuth || {});
+  const bio = String(accountBio || '').trim() || buildXAccountBio(auth.user || {});
+  analyzeAccountPersona(bio);
+}
+
+async function updateProfileFromSamples(options = {}) {
+  const { styleTrainingData, accountBio, xAuth } = await getStorage(['styleTrainingData', 'accountBio', 'xAuth']);
+  const samples = getStyleSamples(styleTrainingData, 12);
+  if (samples.length < 3) {
+    const error = `需要至少 3 条优质推文样本，当前 ${samples.length} 条`;
+    if (options.softFail) {
+      addLog('warn', 'profile_sample_analysis_skipped', [error]);
+      return { success: false, error, sampleCount: samples.length };
+    }
+    throw new Error(error);
+  }
+  if (!options.skipBlock) {
+    await setStorage({ profileAutoAnalyzeBlockedUntil: 0 });
+  }
+  const auth = normalizeXAuth(xAuth || {});
+  const bio = String(accountBio || '').trim() || buildXAccountBio(auth.user || {});
+  if (!bio) {
+    const error = '请先同步 X 基础资料或填写账号定位';
+    if (options.softFail) {
+      addLog('warn', 'profile_sample_analysis_skipped', [error]);
+      return { success: false, error, sampleCount: samples.length };
+    }
+    throw new Error(error);
+  }
+  addLog('info', 'profile_sample_analysis_started', [samples.length]);
+  analyzeAccountPersona(bio);
+  return { success: true, started: true, sampleCount: samples.length };
+}
+
+function runInitialBaselineScan(options = {}) {
+  const force = Boolean(options.force);
+  chrome.storage.local.get(['accountPerformanceBaseline', 'lastBaselineScanAttemptAt', 'xAuth'], (res) => {
+    if (!force && !res.xAuth?.accessToken) return;
+    if (!force && res.accountPerformanceBaseline?.sampleCount >= 5) return;
+    const now = Date.now();
+    if (!force && Number(res.lastBaselineScanAttemptAt) && now - Number(res.lastBaselineScanAttemptAt) < 6 * 60 * 60 * 1000) return;
+    chrome.storage.local.set({ lastBaselineScanAttemptAt: now });
+    addLog('info', 'baseline_scan_started');
+    runPageBaselineScan(options);
+  });
+}
+
+async function openTabAndReadPerformance(item) {
+  const targetUrls = await getReviewTargetUrls(item);
+  return new Promise((resolve) => {
+    markAutomationSystemNavigation();
+    chrome.tabs.create({ url: targetUrls[0] || 'https://x.com/home', active: false }, (tab) => {
+      if (!tab?.id) {
+        resolve({ success: false, error: 'tab not created' });
+        return;
+      }
+      let targetIndex = 0;
+      let targetStartedAt = Date.now();
+      let lastResponse = null;
+      const triedUrls = new Set([targetUrls[0] || 'https://x.com/home']);
+      const closeAndResolve = (response) => {
+        try { chrome.tabs.remove(tab.id); } catch (_) {}
+        resolve(response || lastResponse || { success: false, error: 'post article not found' });
+      };
+      const moveToNextTarget = (preferredUrl = '') => {
+        let nextUrl = preferredUrl && !triedUrls.has(preferredUrl) ? preferredUrl : '';
+        while (!nextUrl && targetIndex + 1 < targetUrls.length) {
+          targetIndex += 1;
+          if (!triedUrls.has(targetUrls[targetIndex])) nextUrl = targetUrls[targetIndex];
+        }
+        if (!nextUrl) {
+          closeAndResolve(lastResponse);
+          return;
+        }
+        triedUrls.add(nextUrl);
+        targetStartedAt = Date.now();
+        markAutomationSystemNavigation();
+        chrome.tabs.update(tab.id, { url: nextUrl }, () => {
+          if (chrome.runtime.lastError) {
+            closeAndResolve({ success: false, error: chrome.runtime.lastError.message });
+            return;
+          }
+          setTimeout(tryRead, 3500);
+        });
+      };
+      const tryRead = () => {
+        requestPerformanceSnapshotWithInjection(tab.id, item).then((response) => {
+          lastResponse = response || lastResponse;
+          if (response?.success) {
+            closeAndResolve(response);
+            return;
+          }
+          if (response?.error === 'views not visible yet' && response.postUrl) {
+            moveToNextTarget(response.postUrl);
+            return;
+          }
+          if (response?.error === 'post article not found' && Date.now() - targetStartedAt > 12000) {
+            moveToNextTarget();
+            return;
+          }
+          if (Date.now() - targetStartedAt > 18000) {
+            moveToNextTarget();
+            return;
+          }
+          setTimeout(tryRead, 1500);
+        });
+      };
+      setTimeout(tryRead, 3500);
+    });
+  });
+}
+
+function markAutoReviewAttempt(vault, itemId, patch = {}) {
+  const index = vault.findIndex(item => item?.id === itemId);
+  if (index < 0) return vault;
+  const current = vault[index];
+  const attempts = Number(current.autoReviewAttempts) || 0;
+  const schedule = Array.isArray(current.autoReviewSchedule) ? current.autoReviewSchedule : [];
+  const nextAutoReviewAt = getNextAutoReviewAtAfterFailure(schedule, { attempts: attempts + 1 });
+  vault[index] = normalizePostRecord({
+    ...current,
+    ...patch,
+    autoReviewAttempts: attempts + 1,
+    lastAutoReviewAt: Date.now(),
+    nextAutoReviewAt,
+    autoReviewEnabled: Boolean(nextAutoReviewAt),
+    lastAutoReviewErrorAt: Date.now()
+  });
+  return vault;
+}
+
+function applyAutoReviewResult(item, response, vault, aiMemory) {
+  const metrics = response?.metrics || {};
+  const discoveredPost = normalizePostRecord({
+    ...item,
+    postUrl: response?.postUrl || item.postUrl || '',
+    statusId: response?.statusId || item.statusId || '',
+    author: response?.author ? `@${String(response.author).replace(/^@/, '')}` : item.author,
+    text: response?.text || item.text
+  });
+  const review = applyPerformanceReview(discoveredPost, {
+    ...metrics,
+    autoReviewedAt: Date.now()
+  }, vault);
+  if (!review?.post) return null;
+  return {
+	    post: normalizePostRecord({
+	      ...review.post,
+	      autoReviewEnabled: false,
+	      nextAutoReviewAt: 0,
+	      lastAutoReviewAt: Date.now(),
+	      lastAutoReviewError: ''
+	    }),
+    aiMemory: updateAiMemoryWithReviewedPost(aiMemory, review.post)
+  };
+}
+
+async function reviewNextPendingPost(options = {}) {
+  const items = await getStorage(['draftVault', 'aiMemory', 'accountPerformanceBaseline']);
+  const vault = Array.isArray(items.draftVault) ? items.draftVault.slice(0, 100).map(normalizePostRecord) : [];
+  const now = Date.now();
+  const targetId = String(options.postId || '').trim();
+  const index = targetId
+    ? vault.findIndex(item => String(item.id || '') === targetId && item.status !== POST_STATUS.REVIEWED)
+    : vault.findIndex(item =>
+      item.autoReviewEnabled
+      && !item.learningDisabled
+      && item.status !== POST_STATUS.REVIEWED
+      && Number(item.nextAutoReviewAt || 0) <= now
+    );
+  if (index < 0) {
+    schedulePerformanceReviewAlarm();
+    return { success: false, error: targetId ? 'tracked post not found' : 'no pending performance review' };
+  }
+
+  const item = vault[index];
+  const response = await openTabAndReadPerformance(item);
+  if (!response?.success || !response.metrics?.views) {
+    const nextVault = markAutoReviewAttempt(vault, item.id, {
+      lastAutoReviewError: response?.error || 'visible metrics not ready'
+    });
+    await setStorage({ draftVault: nextVault });
+    schedulePerformanceReviewAlarm();
+    return { success: false, error: response?.error || 'visible metrics not ready' };
+  }
+
+  const applied = applyAutoReviewResult(item, response, vault, items.aiMemory || {});
+  if (!applied) {
+    schedulePerformanceReviewAlarm();
+    return { success: false, error: 'performance review could not be applied' };
+  }
+  vault[index] = applied.post;
+  const baseline = buildAccountPerformanceBaseline(vault);
+  await setStorage({
+    draftVault: vault.slice(0, 100),
+    aiMemory: applied.aiMemory,
+    accountPerformanceBaseline: {
+      ...(items.accountPerformanceBaseline || {}),
+      ...baseline,
+      updatedBy: 'auto_review'
+    }
+  });
+  addLog('success', 'auto_review_saved');
+  schedulePerformanceReviewAlarm();
+  return { success: true, metrics: response.metrics, postId: item.id };
+}
+
+function handlePostCompleted(source, meta = {}) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['postsToday', 'lastPostDate', 'sessionPostCount', 'pendingPost', 'pendingPostId', 'pendingPostSource'], (result) => {
+      const updates = {
+        pendingPost: null,
+        pendingPostId: null,
+        pendingPostSource: null,
+        pendingScheduledAt: null,
+        isPosting: false,
+        isPostingStartedAt: 0,
+        isAutoPaused: false,
+        pauseReason: ''
+      };
+
+      const finish = () => {
         checkAndSetupAlarm();
         chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
+        resolve();
       };
-      chrome.storage.local.set(updates, complete);
-    };
 
-    const persistAutoPost = () => upsertAutoPostToVault({
-      id: result.pendingPostId,
-      text: result.pendingPost,
-      source: result.pendingPostSource || source,
-      publishedAt: Date.now()
-    });
-    const shouldPersistAutoPost = source === 'instant_gen' || result.pendingPostSource === 'instant_gen';
+      const finalize = (afterPersist) => {
+        chrome.storage.local.set(updates, () => {
+          const cleanup = () => {
+            chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt'], finish);
+          };
+          if (afterPersist) {
+            afterPersist().finally(cleanup);
+            return;
+          }
+          cleanup();
+        });
+      };
 
-    if (source === 'queue' || source === 'instant_gen') {
-      const now = new Date();
-      const todayStr = now.toDateString();
-      let postsToday = result.postsToday || 0;
-      if (result.lastPostDate !== todayStr) postsToday = 0;
-      updates.postsToday = postsToday + 1;
-      updates.lastPostDate = todayStr;
-      updates.sessionPostCount = (result.sessionPostCount || 0) + 1;
-      addLog('success', `推文发布成功，今日已发 ${updates.postsToday} 条`);
-      finalize(shouldPersistAutoPost ? persistAutoPost : null);
+      const persistAutoPost = () => upsertAutoPostToVault({
+        id: result.pendingPostId,
+        text: result.pendingPost,
+        source: result.pendingPostSource || source,
+        postUrl: meta.postUrl || '',
+        statusId: meta.statusId || '',
+        publishedAt: Date.now()
+      });
+      const shouldPersistAutoPost = source === 'instant_gen' || result.pendingPostSource === 'instant_gen';
 
-    } else {
-      addLog('success', '测试推文发送成功');
+      if (source === 'queue' || source === 'instant_gen') {
+        const now = new Date();
+        const todayStr = now.toDateString();
+        let postsToday = result.postsToday || 0;
+        if (result.lastPostDate !== todayStr) postsToday = 0;
+        updates.postsToday = postsToday + 1;
+        updates.lastPostDate = todayStr;
+        updates.sessionPostCount = (result.sessionPostCount || 0) + 1;
+        addLog('success', 'post_published', [updates.postsToday]);
+        finalize(shouldPersistAutoPost ? persistAutoPost : null);
+        return;
+      }
+
+      addLog('success', 'test_post_success');
       finalize();
-    }
+    });
+  });
+}
+
+function buildReplyUniquenessConstraint(recentReplyTexts) {
+  const list = Array.isArray(recentReplyTexts) ? recentReplyTexts : [];
+  const recent = list.filter(Boolean).slice(0, 8);
+  if (recent.length === 0) return '';
+  const lines = recent.map((text) => `- ${String(text).split('\n').find(Boolean) || ''}`);
+  return `最近已发送的回复（禁止使用相似的开头句式或判断，必须换一个新的具体切入点）：\n${lines.join('\n')}`;
+}
+
+function rememberSentReply(text) {
+  const clean = String(text || '').trim();
+  if (!clean) return;
+  chrome.storage.local.get({ recentReplyTexts: [] }, (res) => {
+    const list = Array.isArray(res.recentReplyTexts) ? res.recentReplyTexts : [];
+    const next = [clean, ...list].slice(0, 8);
+    chrome.storage.local.set({ recentReplyTexts: next });
   });
 }
 
@@ -793,14 +2083,18 @@ async function generateAIResponse(tweetContent, replyContext = {}) {
   try {
     const config = await getStorage([
       'apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'styleTrainingData',
-      'engineLanguage', 'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes',
+      'engineLanguage', 'accountLanguage', 'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes',
       'replyStrategy', 'customPromptGlobal', 'aiPersona', 'accountBio', 'leadTarget',
-      'agentMemory', 'aiMemory', 'onboardingStrategy', 'competitorReport'
+      'agentMemory', 'aiMemory', 'accountPerformanceBaseline', 'onboardingStrategy', 'competitorReport',
+      'recentReplyTexts'
     ]);
-    if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = navigator.language.startsWith('zh') ? 'zh' : 'en';
+    config.engineLanguage = normalizeEngineLanguage(
+      (config.engineLanguage || 'auto') === 'auto' && config.accountLanguage ? config.accountLanguage : config.engineLanguage || 'auto',
+      globalThis.navigator?.language || ''
+    );
     const errors = getConfigErrors(config);
     if (errors.length > 0) {
-      addLog('warn', `配置不完整，无法生成回复：${errors.join('、')}`);
+      addLog('warn', 'config_incomplete_reply', [errors.join('、')]);
       throw new Error(errors.join('；'));
     }
     
@@ -811,36 +2105,18 @@ async function generateAIResponse(tweetContent, replyContext = {}) {
       const preferenceConstraint = generationContext.preferencePrompt;
       
       let langConstraint = '';
-      const baseLangConstraint = () => {
-        if (config.engineLanguage === 'en') return '\n【语言约束】：You MUST output in English.';
-        if (config.engineLanguage === 'ja') return '\n【语言约束】：You MUST output in Japanese (日本語).';
-        if (config.engineLanguage === 'es') return '\n【语言约束】：You MUST output in Spanish (Español).';
-        if (config.engineLanguage === 'id') return '\n【语言约束】：You MUST output in Indonesian (Bahasa Indonesia).';
-        if (config.engineLanguage === 'zh') return '\n【语言约束】：必须使用中文输出。';
-        return '';
-      };
+      const baseLangConstraint = () => getLanguageInstruction(config.engineLanguage, 'output', globalThis.navigator?.language || '');
 
       const origLang = replyContext.originalLanguage || '';
       const outputConstraint = baseLangConstraint();
       if (origLang) {
-        langConstraint = `\n【上下文提示】：注意，下面的推文内容已经被 X 平台翻译过，原始语言是「${origLang}」。请基于此背景进行理解。\n${outputConstraint}`;
+        langConstraint = `\n${getPromptText(config.engineLanguage, 'translatedContext', { origLang }, globalThis.navigator?.language || '')}\n${outputConstraint}`;
       } else {
         langConstraint = outputConstraint;
       }
       
       let currentReplyStrategy = config.replyStrategy || '极简流：精辟吐槽 / 玩梗';
-      let strategyInstruction = '';
-      if (currentReplyStrategy.includes('杠精')) {
-        strategyInstruction = '策略：1. 找出原推文逻辑最薄弱的一点进行精准打击；2. 抛出一个极其反直觉的犀利观点；3. 多用反问句引发争议和辩论。要求：一针见血，带点嘲讽感但不做人身攻击，字数控制在40字以内。';
-      } else if (currentReplyStrategy.includes('专业')) {
-        strategyInstruction = '策略：1. 直接基于推文内容进行客观的专业分析，无论赞同还是反对都必须一针见血；2. 【关键】必须要补充一条极其硬核的冷知识、底层逻辑或具体数据来作为支撑。要求：不卑不亢，展现极高的专业素养和信息密度，字数控制在80字以内。';
-      } else if (currentReplyStrategy.includes('极简')) {
-        strategyInstruction = '策略：1. 用一句极其精辟的吐槽、神级比喻或者互联网黑话来总结原推文；2. 绝不要分析，只要情绪价值和幽默感。要求：短平快，字数绝对不能超过15个字。';
-      } else if (currentReplyStrategy.includes('自定义')) {
-        strategyInstruction = '【用户完全自定义策略/System Prompt】：' + (config.customPromptGlobal || '请按照你的判断提供高质量回复。');
-      } else {
-        strategyInstruction = '要求：使用“' + currentReplyStrategy + '”的策略，为这条推文写一条高质量的破冰回复。口语化，不要有AI味。';
-      }
+      const strategyInstruction = buildReplyStrategyInstruction(currentReplyStrategy, config.customPromptGlobal);
 
       const personaContext = `
 【账号生成上下文】
@@ -849,7 +2125,7 @@ ${generationContext.accountBio}
 
 账号画像：
 - 目标用户：${generationContext.persona?.targetUsers || '未填写'}
-- 人设与语气：${generationContext.persona?.characteristics || '未填写'}
+- 账号定位：${generationContext.persona?.characteristics || '未填写'}
 - 发推策略：${generationContext.persona?.goals || '未填写'}
 
 长期记忆：
@@ -861,9 +2137,13 @@ ${generationContext.playbookPrompt || '暂无'}
 发布表现记忆：
 ${generationContext.performanceMemoryPrompt}
 
+高表现样本：
+${generationContext.topPerformancePrompt || '暂无高表现样本。'}
+
 ${styleConstraint}
 ${feedbackConstraint}
 ${preferenceConstraint}
+${buildReplyUniquenessConstraint(config.recentReplyTexts)}
 `;
       
       const prompt = `你是一个严格的 X 评论筛选与回复 Agent。
@@ -875,23 +2155,24 @@ ${preferenceConstraint}
 - 回复后只能显得蹭流量、硬广、尬聊
 - 推文上下文不足，无法补充一个具体判断
 
-如果值得回复，且原推文属于目标受众群体，再写一条自然、有信息增量的短回复：
-- 不超过 90 个字符
+如果值得回复，且原推文属于目标受众群体，再写一条自然短回复：
+- 优先 1-2 句；需要分段时最多两段，每段 2-3 行以内
+- 必须有一个清晰洞见、边界、判断标准或启发式；没有洞见就 SKIP
+- 禁止长篇分析，禁止堆砌事实，禁止为了显得专业而补无关知识
 - 【语言要求】：${langConstraint}
-- 先补充观点/经验/反问，不要上来推销
-- 必须包含一个具体信息增量：判断标准、反例、边界、场景、动作步骤或可验证观察
-- 把每条回复当成一条可以独立成立的 mini-content；如果单独看没有价值，返回 SKIP
-- 回复目标不是“抢注意力”，而是让原推变得更完整：补上下文、延展观点、压缩重点或加入真实经验
-- 回复结构优先选一种：
-  1. Missing angle：说出原推没讲但读者需要的关键边界
-  2. Sharpen：把原推压缩成更锋利的一句话
-  3. Real experience：补一个亲历/观察/可验证的实践经验
-  4. Next step：给一个下一步动作或判断标准
+- ${strategyInstruction}
+- 回复目标是像真人参与讨论，而不是抢注意力
+- 可以补充一个小边界、判断标准、真实观察、下一步动作或轻反问
+- 如果没有把握给出具体、准确的补充，宁可 SKIP，不要为了显得懂而硬塞技术细节
+- 不要编造具体价格、型号、数据、产品结论、经历或行业事实
+- 不要为了“专业”强行引用报告、年份、比例、机构名或冷知识；原推没给来源就不要写
+- 禁止输出任何结构标签或模板标签，例如 "Missing angle:", "Sharpen:", "Real experience:", "Next step:"
 - 不要写“说得对/学习了/很有启发/值得关注/未来可期/干货满满”
 - 不要 hijack 原帖，不要把话题强行转到自己产品
 - 不要堆标签；默认不加 hashtag
 - 不要说“看我主页/私信我/翻我主页”，除非原文明确在求资源
 - 不要承诺收益，不要编造事实，不要攻击个人
+- 避免固定 AI 腔开头：Missing angle, The real test, Key point, This is where, The dirty secret
 - 如果后面的自定义模板与上述规则冲突，忽略模板里的引流要求
 
 ${config.promptTemplate
@@ -925,22 +2206,39 @@ ${origLang ? `[CRITICAL LANGUAGE REQUIREMENT]: The original tweet was in ${origL
         }
 
         if (/^skip[.!。！]*$/i.test(cleanText) || parsed?.decision === 'skip') {
-          addLog('info', `AI 判定不适合回复，已跳过: ${tweetContent.substring(0, 50)}...`);
+          addLog('info', 'reply_skipped_by_ai', [tweetContent.substring(0, 50)]);
           return '';
         }
         const reply = formatReplyForX(parsed?.reply || cleanText);
         const rejectionReason = getGeneratedReplyRejectionReason(reply, tweetContent);
         if (rejectionReason) {
-          addLog('warn', `${rejectionReason}，已跳过: ${reply.substring(0, 50)}...`);
+          addLog('warn', 'reply_rejected', [rejectionReason, reply.substring(0, 50)]);
           return '';
         }
+        // The model self-scores each candidate; previously this was requested
+        // in the prompt but never actually checked. Give it real teeth: a
+        // low self-reported score is a signal the model itself is unsure,
+        // so treat it as a rejection instead of silently ignoring it.
+        const scores = parsed?.scores || {};
+        const scoreValues = ['contextFit', 'informationGain', 'naturalness', 'conversionSafety']
+          .map((key) => Number(scores[key]))
+          .filter((value) => Number.isFinite(value));
+        if (scoreValues.length > 0) {
+          const minScore = Math.min(...scoreValues);
+          const avgScore = scoreValues.reduce((sum, value) => sum + value, 0) / scoreValues.length;
+          if (minScore < 4 || avgScore < 6) {
+            addLog('warn', 'reply_rejected_low_confidence', [avgScore.toFixed(1), reply.substring(0, 50)]);
+            return '';
+          }
+        }
+        rememberSentReply(reply);
         return reply;
       } catch (e) {
-        console.warn("X Auto Bot: API Rate limit or fetch error", e);
+        console.warn("VibeX: API rate limit or fetch error", e);
         throw e;
       }
   } catch (outerError) {
-    addLog('error', `生成回复失败: ${outerError.message}`);
+    addLog('error', 'reply_generation_failed', [outerError.message]);
     throw outerError;
   }
 }
@@ -1083,7 +2381,7 @@ async function handleAgentChat(message) {
         };
         const nextMessages = [...messages, userEntry, assistantEntry].slice(-60);
         chrome.storage.local.set({ agentChatMessages: nextMessages, agentMemory }, () => {
-          addLog('info', 'Agent 对话已本地记录到长期记忆');
+          addLog('info', 'agent_memory_local_saved');
           resolve({ messages: nextMessages, agentMemory, memoryUpdated: true });
         });
         return;
@@ -1113,7 +2411,7 @@ async function handleAgentChat(message) {
 
 账号画像：
 - 目标用户：${config.aiPersona?.targetUsers || '未填写'}
-- 发文特征：${config.aiPersona?.characteristics || '未填写'}
+- 账号定位：${config.aiPersona?.characteristics || '未填写'}
 - 核心目标：${config.aiPersona?.goals || config.leadTarget || '未填写'}
 
 
@@ -1208,7 +2506,7 @@ ${userMessage}
         const nextMessages = [...messages, userEntry, assistantEntry].slice(-60);
 
         chrome.storage.local.set({ agentChatMessages: nextMessages, agentMemory }, () => {
-          addLog('success', 'Agent 对话已更新长期记忆');
+          addLog('success', 'agent_memory_updated');
           resolve({ messages: nextMessages, agentMemory, memoryUpdated: true });
         });
       } catch (error) {
@@ -1218,36 +2516,128 @@ ${userMessage}
   });
 }
 
+function formatPersonaEvidence(config = {}) {
+  const evidence = [];
+  const styleSamples = Array.isArray(config.styleTrainingData) ? config.styleTrainingData : [];
+  const topPosts = Array.isArray(config.accountPerformanceBaseline?.topPosts) ? config.accountPerformanceBaseline.topPosts : [];
+  const seen = new Set();
+  const addLine = (prefix, text) => {
+    const normalized = normalizeStyleSampleText(text);
+    if (!normalized) return;
+    const key = normalized.toLowerCase().replace(/\s+/g, ' ').slice(0, 180);
+    if (seen.has(key)) return;
+    seen.add(key);
+    evidence.push(`${prefix} ${normalized.slice(0, 500)}`);
+  };
+  const styleLearning = formatStyleSampleLearningForPrompt(styleSamples, {
+    limit: 5,
+    title: 'Manual high-quality tweet samples. Treat these as user-curated evidence. Use recurring topics, audience problems, and core theses as positioning signals; use hook/structure lessons as posting strategy signals. Never copy wording, tone, or personality.'
+  });
+  if (styleLearning) evidence.push(styleLearning.slice(0, 4500));
+  topPosts.slice(0, 12).forEach((post, index) => {
+    const metrics = post.performanceMetrics || {};
+    const views = getPostMetricValue(post, 'views');
+    const likes = Number(metrics.likes || 0) || 0;
+    const signal = views || likes ? ` (${views || 0} views, ${likes} likes)` : '';
+    addLine(`Performance context ${index + 1}${signal}:`, post.text);
+  });
+  const creatorText = String(config.creatorCenterSnapshot?.text || '').trim();
+  const limitedEvidence = evidence.slice(0, 20);
+  if (creatorText) {
+    limitedEvidence.push(`Creator Center visible snapshot:\n${creatorText.slice(0, 2500)}`);
+  }
+  return limitedEvidence.join('\n');
+}
+
 async function analyzeAccountPersona(bio) {
-  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', ], async (config) => {
+  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'engineLanguage', 'accountLanguage', 'styleTrainingData', 'accountPerformanceBaseline', 'creatorCenterSnapshot', 'agentMemory', 'aiPersona'], async (config) => {
+    const engineLanguageSource = (config.engineLanguage || 'auto') === 'auto' && config.accountLanguage
+      ? config.accountLanguage
+      : config.engineLanguage || 'auto';
+    const engineLanguage = normalizeEngineLanguage(engineLanguageSource, globalThis.navigator?.language || '');
+    const outputLanguage = getLanguageName(engineLanguage, globalThis.navigator?.language || '');
     const errors = getAIConnectionErrors(config);
     if (errors.length > 0) {
-      addLog('warn', `配置不完整，无法分析账号画像：${errors.join('、')}`);
+      addLog('warn', 'config_incomplete_persona', [errors.join('、')]);
       chrome.storage.local.set({ isAnalyzingPersona: false });
       return;
     }
-    addLog('info', '开始 AI 账号画像分析...');
-    
-    const prompt = `你是 X/Twitter 增长操盘手，请把以下账号主页信息重构成一个“个人发声 Agent 的长期记忆”。
-你不是普通品牌顾问。你的判断必须围绕：
-- 这个账号靠什么被关注
-- 哪类内容负责涨粉、建信任、转化、互动截流、人设加深
-- 目标用户为什么会停留、转发、评论、收藏
-- 账号应该避免哪些会降低可信度或触发风险的表达
+    addLog('info', 'persona_analysis_started');
+    const evidenceContext = formatPersonaEvidence(config);
+    const existingPersona = config.aiPersona || {};
+    const hasExistingPersona = !isWeakAutoPersona(existingPersona);
+    const continuityContext = hasExistingPersona
+      ? `Current positioning already in use (do NOT discard this from scratch):
+Target users: ${existingPersona.targetUsers || 'N/A'}
+Account Positioning: ${existingPersona.characteristics || 'N/A'}
+Posting Strategy: ${existingPersona.goals || 'N/A'}
 
-账号简介：
+Treat the above as the account's established identity. Recalibrate and sharpen it using the new evidence below, but preserve continuity of target audience, territory, and core thesis UNLESS the new evidence clearly shows the account's direction has fundamentally changed. Do not invent an unrelated niche or swap the account's identity on a whim.`
+      : 'No usable existing positioning yet. You may establish the initial positioning freely from the evidence below.';
+
+    const prompt = `You are an elite X/Twitter positioning strategist and ghostwriter for a founder-led account.
+Your job is to turn a thin public profile into a dense, usable writing system for VibeX.
+
+${continuityContext}
+
+CRITICAL LANGUAGE REQUIREMENT:
+- Output every user-facing field in ${outputLanguage}.
+- Do not default to Chinese unless ${outputLanguage} is CHINESE (zh).
+- JSON keys must stay in English. JSON values must be in ${outputLanguage}.
+
+Think like an operator, not a resume writer:
+- What would make this account worth following?
+- What is the account's clear territory, audience, and repeatable point of view?
+- Which content pillars grow followers, trust, comments, saves, and soft conversion?
+- Which writing rules make posts screenshot-worthy instead of generic?
+- What should the account refuse to say because it would sound fake, weak, or risky?
+
+Public X profile / account source:
 ${bio || '暂无'}
 
-产品目标用户是：想在 X 上建立影响力的创始人、独立开发者、出海从业者、AI 工具人、投资/研究人员；以及有想法但输出不稳定、会刷 X 但不会把输入转化为观点和内容、强烈想做 KOL 的人。
+Manual high-quality samples and X performance context:
+${evidenceContext || 'No manual high-quality samples or X performance context yet.'}
 
-请基于账号简介推断，但不要编造具体履历、收益、身份头衔或不可验证案例。输出要可直接填入设置页。
-写法要像给 X 账号操盘用的作战记忆，不要像简历总结或咨询报告。
+VibeX product context:
+The account is using VibeX, an AI copilot for X creators. The broad audience includes founders, indie builders, AI operators, creators, researchers, investors, and people who consume X but struggle to turn inputs into sharp opinions and consistent output.
 
-不要包含任何多余文字，严格以如下 JSON 对象格式返回：
+You must infer positioning from the profile, but NEVER fabricate unverifiable credentials, revenue, customers, employers, titles, or personal history.
+If the profile source is thin, build a strong but honest "starting hypothesis" and say it as operating guidance, not as fake biography.
+
+Quality bar:
+- The "characteristics" field is the Account Positioning textarea. Infer it from BOTH the public bio/profile and the user's high-quality tweet samples.
+- Account Positioning must answer: this account is for whom, about what territory, with what repeated thesis, and under what proof/source boundaries.
+- Manual high-quality samples CAN inform positioning through repeated topics, audience pain, category, and worldview. They must NOT inject tone, catchphrases, self-description, or copied sentences into positioning.
+- Do NOT put personality slogans, witty self-description, "blunt/fearless/sharp" language, vibe labels, or invented biography into "characteristics".
+- The "goals" field is the Posting Strategy textarea. It must be derived primarily from the conclusions of high-quality tweet samples and performance context: which hooks worked, which structures worked, what content pillars appeared, what endings created replies/saves.
+- Posting Strategy must be operational, not motivational. Avoid generic cadence rules unless supported by samples or performance evidence.
+- Use X performance context only for empirical topics/audience/format signals. Do not imitate it as writing style unless it also appears in manual high-quality samples.
+- Also produce memory fields that reflect the scanned evidence, not just the profile bio.
+- Make it as specific and vivid as the source allows.
+- Avoid safe corporate phrases such as "professional", "insightful", "share valuable content", "establish authority" unless made concrete.
+- Do not write a bland marketing persona.
+- Never paste raw sample lines into either textarea. Convert evidence into concise conclusions.
+- Use line breaks inside strings with \\n. No Markdown headings outside the JSON.
+
+Reference density and shape:
+Account Positioning should feel like:
+"For indie builders and AI creators trying to turn scattered inputs into consistent X output.
+Territory: AI workflows, creator systems, build-in-public, and lightweight automation.
+Repeated thesis from bio + samples: distribution improves when capture, thinking, writing, and review become one loop.
+Boundaries: no unverifiable revenue claims, no fake customer stories, no generic AI hype."
+
+Posting Strategy should feel like:
+"Strategy derived from high-quality samples:
+- Hooks: lead with a concrete tension, failed assumption, or sharp contrast.
+- Structures: use object comparison, variable reversal, or short observation -> implication -> punchline.
+- Pillars: AI workflow teardown, creator distribution systems, build-in-public lessons.
+- Endings: close with a reusable judgment standard; avoid generic 'what do you think' questions."
+
+Return STRICT JSON only:
 {
   "targetUsers": "...",
-  "characteristics": "...",
-  "goals": "...",
+  "characteristics": "Account Positioning text only. 3-5 concrete lines inferred from bio + high-quality samples. No tone/personality/raw sample lines.",
+  "goals": "Posting Strategy text derived from high-quality sample conclusions and performance context. Include hooks, structures, pillars, endings, and operational rules with \\n line breaks.",
   "memory": {
     "identity": "...",
     "marketPosition": "...",
@@ -1275,19 +2665,21 @@ ${bio || '暂无'}
       // Clean up markdown code blocks if the model wrapped it
       const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleanJsonStr);
+      const personaLanguage = resolveAutoPersonaLanguage(config.engineLanguage || 'auto', globalThis.navigator?.language || '', config.accountLanguage || '');
+      const fallbackPersona = buildInitialPersonaFromXUser({}, {}, config.engineLanguage || 'auto', {}, config.accountLanguage || '');
       const persona = {
-        targetUsers: parsed.targetUsers || '科技、互联网与 AI 领域的活跃网友',
-        characteristics: parsed.characteristics || '幽默、犀利、喜欢参与前沿话题讨论',
-        goals: parsed.goals || '建立有趣的个人品牌，扩大社交圈与影响力'
+        targetUsers: parsed.targetUsers || (personaLanguage === 'zh' ? '科技、互联网与 AI 领域的活跃用户' : 'Active builders, creators, and operators in AI, tech, and internet culture'),
+        characteristics: parsed.characteristics || fallbackPersona.characteristics,
+        goals: parsed.goals || fallbackPersona.goals
       };
       const agentMemory = mergeAgentMemory(config.agentMemory, parsed.memory || parsed.agentMemory || {});
       
       chrome.storage.local.set({ aiPersona: persona, agentMemory, isAnalyzingPersona: false }, () => {
-         addLog('success', '账号画像分析完成');
+         addLog('success', 'persona_analysis_completed');
          analyzeCompetitors(persona, agentMemory);
       });
     } catch (e) {
-      addLog('error', `账号画像分析失败: ${e.message}`);
+      addLog('error', 'persona_analysis_failed', [e.message]);
       chrome.storage.local.set({ isAnalyzingPersona: false });
     }
   });
@@ -1410,13 +2802,13 @@ ${playbookCatalog}
 }`;
 
       try {
-        addLog('info', '开始启动向导来源分析');
+        addLog('info', 'onboarding_analysis_started');
         const generatedText = await callLLM(prompt, config, true);
         const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(cleanJsonStr);
         const analysis = normalizeOnboardingAnalysis(parsed, source);
         chrome.storage.local.set({ onboardingSourceAnalysis: analysis }, () => {
-          addLog('success', '启动向导来源分析完成');
+          addLog('success', 'onboarding_analysis_completed');
           resolve(analysis);
         });
       } catch (error) {
@@ -1483,11 +2875,11 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
   chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', ], async (config) => {
     const errors = getAIConnectionErrors(config);
     if (errors.length > 0) {
-      addLog('warn', `配置不完整，无法分析竞品：${errors.join('、')}`);
+      addLog('warn', 'config_incomplete_competitor', [errors.join('、')]);
       chrome.storage.local.set({ isAnalyzingCompetitors: false });
       return;
     }
-    addLog('info', '开始竞品对标与爆款策略分析...');
+    addLog('info', 'competitor_analysis_started');
     const playbook = selectGrowthPlaybook({
       onboardingStrategy: config.onboardingStrategy,
       persona,
@@ -1500,7 +2892,7 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
 
 账号定位：
 - 目标用户：${persona.targetUsers}
-- 发文特征：${persona.characteristics}
+- 账号定位：${persona.characteristics}
 - 核心目标：${persona.goals}
 - 长期记忆：
 
@@ -1522,7 +2914,7 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
       const report = await callLLM(prompt, config, false);
       
       chrome.storage.local.set({ competitorReport: report, isAnalyzingCompetitors: false }, () => {
-         addLog('success', '竞品分析报告生成完成');
+         addLog('success', 'competitor_analysis_completed');
          chrome.storage.local.get(['setupAutoStartRequested'], (res) => {
             if (res.setupAutoStartRequested) {
                maybeStartAgentAfterSetup(() => {});
@@ -1530,7 +2922,7 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
          });
       });
     } catch (e) {
-      addLog('error', `竞品分析失败: ${e.message}`);
+      addLog('error', 'competitor_analysis_failed', [e.message]);
       chrome.storage.local.set({ isAnalyzingCompetitors: false });
     }
   });
@@ -1540,23 +2932,13 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
-    const hasSyncKeyChanges = Object.keys(changes).some(k => SYNC_KEYS.includes(k));
-    const isOnlyStatusChange = Object.keys(changes).every(k => ['gistStatus', 'gistLastSyncAt', 'gistLastError', 'gistId', 'logs'].includes(k));
-    
-    if (hasSyncKeyChanges && !isOnlyStatusChange) {
-      chrome.storage.local.get(['gistToken', 'gistId', 'gistAutoSync'], (res) => {
-        if (res.gistAutoSync && res.gistToken) {
-          clearTimeout(gistSyncTimer);
-          gistSyncTimer = setTimeout(() => {
-            pushToGist(res.gistToken, res.gistId);
-          }, 10000);
-        }
-      });
-    }
-
     if (changes.accountBio && changes.accountBio.newValue) {
-       addLog('info', '检测到主页简介更新，触发画像分析');
-       analyzeAccountPersona(changes.accountBio.newValue);
+       addLog('info', 'profile_bio_updated');
+       chrome.storage.local.get(['profileAutoAnalyzeBlockedUntil'], (res) => {
+         const blockedUntil = Number(res.profileAutoAnalyzeBlockedUntil || 0);
+         if (blockedUntil > Date.now()) return;
+         analyzeAccountPersona(changes.accountBio.newValue);
+       });
     }
      if (changes.isRunning && changes.isRunning.newValue) {
        console.log('[VibeX] 🚀 isRunning changed to TRUE — starting engine...');
@@ -1565,19 +2947,20 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           const errors = getConfigErrors(res);
           if (errors.length > 0) {
              console.log('[VibeX] ❌ Config errors:', errors);
-             addLog('error', `启动失败：${errors.join('、')}，请先到配置中心完善设置`);
+             addLog('error', 'engine_start_failed', [errors.join('、')]);
              chrome.storage.local.set({ isRunning: false, configErrors: errors });
              return;
           }
           chrome.storage.local.remove(['configErrors']);
-          addLog('info', '机器人已启动');
+          addLog('info', 'automation_started');
           console.log('[VibeX] ✅ 机器人已启动 — resetting state');
           chrome.storage.local.set({
              twitterCooldownUntil: 0,
              apiCooldownUntil: 0,
-             isGeneratingReply: false,
              isGenerating: false,
-             isTyping: false,
+             isPosting: false,
+             isPostingStartedAt: 0,
+             ...buildReplyFlowTransition({}, REPLY_FLOW_EVENTS.CLEAR).update,
              isAutoPaused: false,
              pauseReason: '',
              sessionPostCount: 0,
@@ -1594,13 +2977,15 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
              console.log('[VibeX] → Branch: Persona exists or no Bio. Calling checkAndSetupAlarm.');
           }
           chrome.alarms.create("autoShutdownAlarm", { delayInMinutes: 600 });
+          ensureAutomationXTab({ active: false, reason: 'automation_started' });
           checkAndSetupAlarm();
           chrome.power.requestKeepAwake('display');
        });
     } else if (changes.isRunning && !changes.isRunning.newValue) {
-       addLog('info', '机器人已停止');
+       addLog('info', 'automation_stopped');
        chrome.alarms.clear("postTweetAlarm");
        chrome.alarms.clear("autoShutdownAlarm");
+       chrome.storage.local.set({ isPosting: false, isPostingStartedAt: 0 });
        chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
        chrome.power.releaseKeepAwake();
     }
@@ -1611,7 +2996,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           chrome.power.requestKeepAwake('display');
           chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'isRunning'], (res) => {
              if (res.pendingPost && (res.isRunning || res.pendingPostSource === 'manualTest')) {
-                addLog('info', '检测到自动操作恢复，继续处理待发送推文');
+                addLog('info', 'automation_resumed_pending_post');
                 triggerPostInTab();
              } else {
                 checkAndSetupAlarm();
@@ -1620,7 +3005,10 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
        }
     }
     if (changes.engineLanguage && changes.engineLanguage.newValue !== changes.engineLanguage.oldValue) {
-       addLog('info', '输出语言已切换');
+       addLog('info', 'language_switched');
+       syncAutoPersonaLanguage(changes.engineLanguage.newValue || 'auto').catch((error) => {
+          addLog('warn', 'persona_language_sync_failed', [error.message]);
+       });
     }
   }
 });
@@ -1631,15 +3019,9 @@ let isSidePanelOpen = false;
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "sidepanel") {
     isSidePanelOpen = true;
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach(t => chrome.tabs.sendMessage(t.id, { action: 'sidePanelState', isOpen: true }).catch(()=>{}));
-    });
     
     port.onDisconnect.addListener(() => {
       isSidePanelOpen = false;
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach(t => chrome.tabs.sendMessage(t.id, { action: 'sidePanelState', isOpen: false }).catch(()=>{}));
-      });
     });
   }
 });
@@ -1655,13 +3037,13 @@ chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
         path: 'options/options.html',
         enabled: true
       });
-      chrome.action.enable(tabId);
+      await chrome.action.enable(tabId);
     } else {
       await chrome.sidePanel.setOptions({
         tabId,
         enabled: false
       });
-      chrome.action.disable(tabId);
+      await chrome.action.disable(tabId);
     }
   } catch (e) {}
 });
@@ -1673,9 +3055,9 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     if (!tab.url) return;
     const url = new URL(tab.url);
     if (url.hostname.includes('x.com') || url.hostname.includes('twitter.com')) {
-      chrome.action.enable(activeInfo.tabId);
+      await chrome.action.enable(activeInfo.tabId);
     } else {
-      chrome.action.disable(activeInfo.tabId);
+      await chrome.action.disable(activeInfo.tabId);
     }
   } catch(e) {}
 });

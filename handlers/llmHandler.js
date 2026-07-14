@@ -1,6 +1,117 @@
 import { callLLM } from '../services/llm.js';
 import { addLog } from '../core/state.js';
 import { buildGenerationContext } from '../core/generationContext.js';
+import { getLanguageInstruction, getPromptText, normalizeEngineLanguage } from '../core/i18n.js';
+import { buildLegacyReplyStrategyPrompt } from '../core/replyStrategies.js';
+import { buildDirectRewritePrompt, buildViralRewritePromptPrefix } from '../core/rewritePrompts.js';
+import { getBannedClichePhrasesRule } from '../core/contentRules.js';
+import { buildStudioPrompt, buildStudioRegenerateInstruction } from '../core/studioPrompt.js';
+import { assessStudioOutputQuality } from '../core/studioQuality.js';
+import { fetchWithTimeout } from '../utils/fetchUtils.js';
+
+function detectInputLanguage(text = '') {
+  const source = String(text || '')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/www\.\S+/gi, ' ')
+    .replace(/\[从链接[^\]]*\]/g, ' ')
+    .replace(/\[用户补充说明\]/g, ' ')
+    .replace(/\[extracted from link[^\]]*\]/gi, ' ')
+    .replace(/\[user note\]/gi, ' ');
+  if (/[\u3400-\u9fff]/.test(source)) return 'zh';
+  if (/[\u3040-\u30ff]/.test(source)) return 'ja';
+  if (/[¿¡ñáéíóúü]/i.test(source)) return 'es';
+  if (/[A-Za-z]/.test(source)) return 'en';
+  return '';
+}
+
+function buildInputLockedRewriteRules(text = '', outputLang = '') {
+  const detectedLang = detectInputLanguage(text);
+  const normalizedText = String(text || '').replace(/\s+/g, ' ').trim();
+  const inputLength = normalizedText.length;
+  const maxChineseChars = inputLength <= 90 ? 120 : inputLength <= 220 ? 220 : 360;
+  const languageNames = {
+    zh: '中文',
+    en: 'English',
+    ja: 'Japanese',
+    es: 'Spanish',
+    id: 'Indonesian'
+  };
+  const languageRule = detectedLang
+    ? `【待处理文本】的输入语言是 ${languageNames[detectedLang] || detectedLang}，这只用于理解原意。最终输出必须遵守后台 Engine Language/上方语言约束，不要跟随输入语言，也不要被账号样本或历史记忆带成其他语言。`
+    : '最终输出必须遵守后台 Engine Language/上方语言约束；只重写表达，不改变主题。';
+  return `\n\n【最高优先级 - 输入锁定】：
+1. 【待处理文本】是本次唯一主题来源，必须围绕它改写。
+2. 严禁把账号高表现样本、账号简介、产品名或历史记忆当成本次主题。
+3. 严禁无中生有改成 VibeX、Agents、产品发布、创业宣言等与原文无关的内容。
+4. 历史样本只能参考节奏、Hook 强度和排版，不能复述、借题发挥或替换主题。
+5. ${languageRule}
+6. 改写只能提高表达质量、结构和 X 原生感；不得新增原文没有的核心事件、对象、结论或行动号召。
+7. 如果原文是怀疑、吐槽、反问或主观感受，输出也必须保持这个证据强度；不得升级成确定事实、内幕判断或商业定论。
+8. 不要强行套用历史样本里的隐喻、对象关系或结尾金句；只有原文本身已经具备相同结构时才可使用。
+9. 长度预算：本次输出最多约 ${maxChineseChars} 个中文字符。除非用户明确要求 thread/长文，否则不要超过这个预算。
+10. 如果【待处理文本】很短，输出也要保持短；不要扩写成长帖。
+11. 排版预算：如果原文是社会性现象/群体心理类的散文式论述（适合“排比金句结构”），允许拆成 4-8 个短句、每句单独一行；其余情况默认 1 段，最多 2 段，不要每句话单独换行，不要不必要地每句后空一行。
+12. 禁用没有信息量的空话套壳：${getBannedClichePhrasesRule()}`;
+}
+
+function delay(ms = 0) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchJinaExtractedText(url) {
+  addLog('info', 'jina_route');
+  const apiRes = await fetchWithTimeout(`https://r.jina.ai/${url}`, {
+    method: 'GET',
+    headers: { 'Accept': 'text/plain' }
+  }, 15000);
+  if (!apiRes.ok) throw new Error(`Jina HTTP ${apiRes.status}`);
+  return apiRes.text();
+}
+
+async function fetchDataHubExtractedText(url, apiKey) {
+  addLog('info', 'datahub_complex_route');
+  const submitRes = await fetchWithTimeout('https://datahub.codes/api/datahub/execute/v0', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiKey
+    },
+    body: JSON.stringify({ query: `提取这个链接的内容：${url}`, channel: 'ChipStar' })
+  }, 10000);
+  if (!submitRes.ok) throw new Error(`DataHub 提交失败 HTTP ${submitRes.status}`);
+
+  const data = await submitRes.json();
+  const processId = data.processId || data.id || (data.data && data.data.processId);
+  if (!processId) throw new Error("未获取到 DataHub processId: " + JSON.stringify(data));
+
+  addLog('info', 'datahub_task_submitted');
+  const pollDeadline = Date.now() + 18000;
+  while (Date.now() < pollDeadline) {
+    await delay(2000);
+    const remainingMs = pollDeadline - Date.now();
+    if (remainingMs <= 0) break;
+
+    const pollRes = await fetchWithTimeout(`https://datahub.codes/api/processes/${encodeURIComponent(processId)}.md`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/markdown,text/plain,*/*',
+        'X-API-Key': apiKey
+      }
+    }, Math.min(5000, remainingMs));
+    if (pollRes.status === 200) {
+      const text = await pollRes.text();
+      if (text.includes('*此过程文件为最终版本。*') || text.includes('此过程文件为最终版本')) {
+        return text;
+      }
+      continue;
+    }
+    if (pollRes.status === 404 || pollRes.status === 202 || pollRes.status === 400) {
+      continue;
+    }
+    throw new Error(`轮询失败 HTTP ${pollRes.status}`);
+  }
+  throw new Error("DataHub 解析超时");
+}
 
 export function handleLLMMessage(request, sender, sendResponse, context) {
   if (request.action === "testApiConnection") {
@@ -18,24 +129,24 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
       qwen: 'qwen-plus'
     };
     chrome.storage.local.get(['aiModel'], (items) => {
-      callLLM(pingPrompt, { 
-        apiKey: request.apiKey, 
-        apiProvider: provider, 
-        aiModel: items.aiModel || defaultModels[provider] || 'gemini-2.5-flash' 
+      callLLM(pingPrompt, {
+        apiKey: request.apiKey,
+        apiProvider: provider,
+        aiModel: items.aiModel || defaultModels[provider] || 'gemini-2.5-flash'
       }, false)
         .then(() => sendResponse({ success: true }))
         .catch(err => sendResponse({ success: false, error: err.message }));
     });
     return true;
   } else if (request.action === "generateReply") {
-    addLog('info', '收到回复生成请求，调用 AI 接口...');
+    addLog('info', 'reply_request_received');
     context.generateAIResponse(request.tweetContent || request.tweetText || '', request)
       .then(replyText => {
-        addLog('success', 'AI 回复生成完成');
+        addLog('success', 'reply_generation_complete');
         sendResponse({ success: true, replyText, reply: replyText });
       })
       .catch(error => {
-        addLog('error', `AI 接口调用失败: ${error.message}`);
+        addLog('error', 'ai_api_failed', [error.message]);
         sendResponse({
           success: false,
           error: error.message,
@@ -50,33 +161,24 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
         'apiKey', 'apiProvider', 'aiModel', 'styleTrainingData', 'engineLanguage',
         'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes', 'replyStrategy',
         'customPromptGlobal', 'aiPersona', 'aiMemory', 'agentMemory',
-        'accountBio', 'leadTarget', 'onboardingStrategy', 'competitorReport'
+        'accountBio', 'leadTarget', 'onboardingStrategy', 'competitorReport',
+        'accountPerformanceBaseline'
       ], (config) => {
         if (!config.apiKey || config.apiKey.trim() === '' || config.apiKey.startsWith('mock-')) {
           sendResponse({ success: false, error: 'ERR_MISSING_API_KEY' });
           return;
         }
-        if (!config.engineLanguage || config.engineLanguage === 'auto') config.engineLanguage = navigator.language.startsWith('zh') ? 'zh' : 'en';
+        const rawEngineLanguage = config.engineLanguage || 'auto';
+        config.engineLanguage = normalizeEngineLanguage(rawEngineLanguage, globalThis.navigator?.language || '');
         const generationContext = buildGenerationContext(config, { promptType: req.promptType });
         let promptPrefix = '';
-        const currentReplyStrategy = config.replyStrategy || '专业流：专业知识 / 数据';
-        
-        let strategyPrompt = '';
-        if (currentReplyStrategy.includes('杠精')) {
-          strategyPrompt = '你是一个极其犀利、专挑漏洞的“抬杠带师”和反直觉思考者。任务：回复这条推文。策略：1. 找出原推文逻辑最薄弱的一点进行精准打击；2. 抛出一个极其反直觉的犀利观点；3. 多用反问句引发争议和辩论。要求：一针见血，带点嘲讽感但不做人身攻击，字数控制在40字以内。';
-        } else if (currentReplyStrategy.includes('专业')) {
-          strategyPrompt = '你是一个在行业内深耕多年、极具洞察力的行业老兵。任务：客观且专业地回复这条推文。策略：1. 直接基于推文内容进行客观的专业分析，无论赞同还是反对都必须一针见血；2. 【关键】必须要补充一条极其硬核的冷知识、底层逻辑或具体数据来作为支撑。要求：不卑不亢，展现极高的专业素养和信息密度，字数控制在80字以内。';
-        } else if (currentReplyStrategy.includes('极简')) {
-          strategyPrompt = '你是一个极度厌恶长篇大论、浑身都是梗的网络乐子人。任务：回复这条推文。策略：1. 用一句极其精辟的吐槽、神级比喻或者互联网黑话来总结原推文；2. 绝不要分析，只要情绪价值和幽默感。要求：短平快，字数绝对不能超过15个字。';
-        } else if (currentReplyStrategy.includes('自定义')) {
-          strategyPrompt = config.customPromptGlobal || '你是一位专业的AI助手，请按照你的判断提供高质量回复。';
-        } else {
-          strategyPrompt = '你是一位混迹推特多年的资深真实网友。任务：请使用“' + currentReplyStrategy + '”的策略，为这条推文写一条高质量的破冰回复。要求：口语化，不要有AI味。';
-        }
+        const currentReplyStrategy = config.replyStrategy || '专业流：认知洞见 / 启发式';
 
-        const errorMsgText = config.engineLanguage === 'en' 
-          ? '❌ Link content extraction failed, unable to rewrite. Please check if the link is valid, or try manually copying the core text.'
-          : '❌ 链接内容提取失败，无法进行仿写。请检查链接是否有效，或尝试手动复制核心文字进行输入。';
+        const strategyPrompt = buildLegacyReplyStrategyPrompt(currentReplyStrategy, config.customPromptGlobal);
+
+        const errorMsgText = config.engineLanguage === 'zh'
+          ? '❌ 链接内容提取失败，无法进行仿写。请检查链接是否有效，或尝试手动复制核心文字进行输入。'
+          : '❌ Link content extraction failed, unable to rewrite. Please check if the link is valid, or try manually copying the core text.';
 
         switch(req.promptType) {
           case 'draft_reply':
@@ -84,41 +186,10 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
             break;
 
           case 'viral_rewrite':
-            promptPrefix = `你是一位 X (Twitter) 千万级爆款操盘手。你的任务是对提供的【原始内容】进行“降维打击式”的网感重构，彻底迎合 X 平台的推荐算法。
-不要生搬硬套固定的结构模板，请务必根据原文的【类型】和【长度】采取不同的改写策略：
-
-1. 【短平快/情绪向】（原文如果是1-2句话的感叹、碎碎念、疑问、纯情绪发泄）：
-   - 策略：保留“轻量感”和“情绪张力”。
-   - 做法：直接改写成一句极具煽动性的暴论、扎心的反问、或幽默的吐槽。字数越少越好，一刀致命，用来骗高频点赞和回复。
-
-2. 【中篇干货/经验感悟】（原文如果是几段日常观察或故事）：
-   - 策略：利用“视觉呼吸感”拉高 Dwell Time（停留时间）。
-   - 做法：使用“反常识钩子(Hook) + 极简短句 + 垂直大留白”结构。强制大量使用空行（每讲完一句核心逻辑就空一行），迫使读者滑动屏幕减速。
-
-3. 【硬核长文/深度解析】（原文如果是长篇深度分析、数据、行业洞察）：
-   - 策略：打造“书签诱饵（Bookmark Trigger）”。X 算法极度偏好高收藏量内容。
-   - 做法：采用“一句震撼人心的结论 + 清晰的条目列表(Bullet points) + 颠覆性认知”的框架。信息密度极高，让人看一眼就忍不住点击收藏。
-
-【强制流量与算法铁律】：
-- 【拒绝外部链接】：如果你在原文中看到任何带有 "http" 或 "www" 的外部链接，请**直接将链接删除或用一句话概括其内容**，绝对不要在输出的正文中保留任何外链（外链会被 X 平台严厉降流限权）。
-- 【禁止烂俗互动】：严禁任何“AI味”结尾（如“你觉得呢？”、“让我们一起探索”、“分享你的看法”）。
-- 【无标签约束】：绝对禁止在正文生成任何 #标签 (Hashtag)。
-- 必须有属于你人设的增量思考或态度，绝不能仅仅是同义词替换。
-
-完成正文后必须立即停止输出！绝对禁止啰嗦。
-
-【异常处理机制】：
-如果【原始内容】明显是爬虫或提取工具的报错信息（例如“Watching a video link fail to load”、“系统无法解析”、“无法获取页面内容”、“请手动输入”等），请绝对不要进行仿写！你必须直接回复：“${errorMsgText}”
-
-请直接输出重构后的高传播推文：
-
-原始内容：
-`;
-            // Inject persona context for rewrite
-            const persona = config.aiPersona || {};
-            if (persona.characteristics || persona.goals) {
-              promptPrefix = promptPrefix.replace('请直接输出重构后的高传播推文：', `【账号人设】：${persona.characteristics || '未填写'}\n【发推策略】：${persona.goals || '未填写'}\n\n请直接输出重构后的高传播推文：`);
-            }
+            promptPrefix = buildViralRewritePromptPrefix({
+              errorMsgText,
+              persona: config.aiPersona || {}
+            });
             break;
           case 'analyze_style':
             promptPrefix = '请帮我深度拆解以下推文的爆款结构、情绪价值和潜在可模仿点，输出一个可复用的写作框架：\n\n';
@@ -132,77 +203,57 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
           default:
             promptPrefix = '请处理以下内容：\n';
         }
-        
-        let styleConstraint = ['viral_rewrite', 'draft_reply'].includes(req.promptType) ? generationContext.stylePrompt : '';
-        
-        let feedbackConstraint = generationContext.editFeedbackPrompt;
 
-        let preferenceConstraint = generationContext.preferencePrompt;
-
-        let performanceMemoryConstraint = '';
-        if (req.promptType === 'viral_rewrite') {
-          performanceMemoryConstraint = `\n【发布表现记忆】：以下规则来自用户过往 X post 的预测浏览量与实际浏览量偏差，请在这次重写时优先遵守，用它们修正选题、hook 和表达方式：\n${generationContext.performanceMemoryPrompt}\n`;
-        }
-        
         let langConstraint = '';
-        const baseLangConstraint = () => {
-          if (config.engineLanguage === 'en') return '\n【语言约束】：You MUST output in English.';
-          if (config.engineLanguage === 'ja') return '\n【语言约束】：You MUST output in Japanese (日本語).';
-          if (config.engineLanguage === 'es') return '\n【语言约束】：You MUST output in Spanish (Español).';
-          if (config.engineLanguage === 'id') return '\n【语言约束】：You MUST output in Indonesian (Bahasa Indonesia).';
-          if (config.engineLanguage === 'zh') return '\n【语言约束】：必须使用中文输出。';
-          return '';
-        };
+        const baseLangConstraint = () => getLanguageInstruction(config.engineLanguage, 'output', globalThis.navigator?.language || '');
 
         if (req.promptType === 'viral_rewrite') {
-          if (config.engineLanguage === 'en') langConstraint = '\n【语言约束】：You MUST rewrite in English.';
-          else if (config.engineLanguage === 'ja') langConstraint = '\n【语言约束】：You MUST rewrite in Japanese (日本語).';
-          else if (config.engineLanguage === 'es') langConstraint = '\n【语言约束】：You MUST rewrite in Spanish (Español).';
-          else if (config.engineLanguage === 'id') langConstraint = '\n【语言约束】：You MUST rewrite in Indonesian (Bahasa Indonesia).';
-          else if (config.engineLanguage === 'zh') langConstraint = '\n【语言约束】：必须使用中文重写。';
-          else langConstraint = '\n【语言约束】：请自动识别原文语言并使用相同语言重写。';
+          langConstraint = getLanguageInstruction(config.engineLanguage, 'rewrite', globalThis.navigator?.language || '');
         } else if (req.promptType === 'draft_reply') {
           const origLang = req.contextData?.originalLanguage || '';
           const outputConstraint = baseLangConstraint();
           if (origLang) {
-            langConstraint = `\n【上下文提示】：注意，下面的推文内容已经被 X 平台翻译过，原始语言是「${origLang}」。请基于此背景进行理解。\n${outputConstraint}`;
+            langConstraint = `\n${getPromptText(config.engineLanguage, 'translatedContext', { origLang }, globalThis.navigator?.language || '')}\n${outputConstraint}`;
           } else {
             langConstraint = outputConstraint;
           }
         } else {
           langConstraint = baseLangConstraint();
         }
-        
+
         let strictAntiAI = '';
         if (req.promptType === 'viral_rewrite') {
-          strictAntiAI = `
-
-【极其严格的反AI味与 X 平台算法排版约束】：
-1. 绝对禁止使用任何典型的AI套话...
-2. 【Hook（钩子）至上】：开头第一句话必须制造悬念、反常识或者信息落差！绝对禁止使用“冷知识：”、“划重点：”、“事实证明”这种俗套的营销号开头。如果内容很长，用最简短的词汇单刀直入。
-3. 句子必须极其口语化、接地气。像真实网友随手在手机上敲出来的文字，允许存在适当的口语化破绽和情绪宣泄。
-4. 【排版强迫症】：中文字符与英文字母/数字之间**必须**加一个半角空格（例如：欧洲 Mistral）。
-5. 【极度追求视觉呼吸感】：长文本必须频繁分段！每一句话或每两句话之间**必须**留出空行。绝不要把多句话挤在一团，利用垂直空间占用拉高读者的 Dwell Time。
-6. 【社交化微表情】：请在句尾或情绪爆发点极其自然地加上1-2个Emoji（例如😅、🤔、🔥等），提升社交属性。
-7. 【绝对禁忌一：无标签】：**绝对禁止生成任何 #标签 (Hashtag)。无论如何都不要生成带有 # 符号的话题标签！**
-8. 【绝对禁忌二：无外链】：**绝对禁止在正文中包含任何外部 URL 链接。所有的外部链接必须被删除或用文字概括！**
-9. 【禁用 Markdown】：推特不支持 Markdown 解析。**绝对禁止使用任何 Markdown 格式符号**。如果需要强调，直接换行或用 Emoji。
-10. 【最终输出铁律】：**绝对禁止输出多个备选方案！绝对禁止输出任何分析、打分、评价等废话前缀！**`;
+          strictAntiAI = `\n\n${getPromptText(config.engineLanguage, 'rewriteStrictRules', {}, globalThis.navigator?.language || '')}`;
         } else if (req.promptType === 'draft_reply') {
-          // 只保留一条防止输出多个备选选项和 Markdown 的底线，不添加任何结构排版限制
-          strictAntiAI = `\n\n【输出铁律】：**绝对禁止输出多个备选方案或分析打分等废话前缀！绝对禁止使用任何 Markdown 格式符号。只能输出唯一的一条真实回复文本！**`;
+          strictAntiAI = `\n\n${getPromptText(config.engineLanguage, 'uniqueReplyOnly', {}, globalThis.navigator?.language || '')}`;
         }
-
-        const currentYear = new Date().getFullYear();
-        const currentMonth = new Date().getMonth() + 1;
-        const timeContext = `\n\n【极其重要的背景设定】：当前时间是 ${currentYear}年${currentMonth}月。如果引用数据、事实或趋势，请务必使用此时的最新情况，绝不要使用2023年的旧数据或旧观点！`;
 
         let regenerateConstraint = '';
         if (req.isRegenerate) {
-          regenerateConstraint = `\n\n【用户反馈 - 重新生成指令】：注意！用户点击了“重新生成”，这说明你上一次生成的文案**非常不符合预期，导致用户完全不想使用甚至懒得修改**。请你立刻反思，抛弃上一版的切入点、废话和毫无新意的逻辑，尝试换一个完全不同的、更新颖的、更一针见血的角度来进行本次生成！`;
+          regenerateConstraint = buildStudioRegenerateInstruction(true);
         }
 
-        callLLM(promptPrefix + timeContext + langConstraint + styleConstraint + feedbackConstraint + preferenceConstraint + performanceMemoryConstraint + strictAntiAI + regenerateConstraint + '\n\n待处理文本：\n' + textToProcess, config, false, (chunk) => {
+        const inputLockConstraint = req.promptType === 'viral_rewrite'
+          ? buildInputLockedRewriteRules(textToProcess, config.engineLanguage)
+          : '';
+
+        const finalPrompt = ['viral_rewrite', 'draft_reply'].includes(req.promptType)
+          ? buildStudioPrompt({
+            promptType: req.promptType,
+            promptPrefix,
+            textToProcess,
+            config,
+            generationContext,
+            langConstraint,
+            inputLockConstraint,
+            strictAntiAI,
+            regenerateConstraint,
+            includePerformanceMemory: req.promptType === 'viral_rewrite',
+            includeTopPerformanceSamples: false
+          })
+          : promptPrefix + langConstraint + '\n\n【待处理文本】：\n' + textToProcess;
+
+        callLLM(finalPrompt, config, false, (chunk) => {
           if (senderTab && senderTab.id) {
             chrome.tabs.sendMessage(senderTab.id, { action: 'magicPromptStreamChunk', chunk: chunk }).catch(()=>null);
           } else {
@@ -226,84 +277,45 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
                });
              }
              const cleanResult = result.replace(/\*\*/g, '').replace(/__/g, '');
-             sendResponse({ success: true, result: cleanResult });
+             const quality = ['viral_rewrite', 'draft_reply'].includes(req.promptType)
+               ? assessStudioOutputQuality(textToProcess, cleanResult, { rules: { requireConcreteSignal: req.promptType === 'viral_rewrite' } })
+               : { approved: true, issues: [] };
+             if (!quality.approved) {
+               addLog('warn', 'studio_quality_guard_warning', [quality.issues.join(', ')]);
+             }
+             sendResponse({ success: true, result: cleanResult, quality });
           })
           .catch(error => sendResponse({ success: false, error: error.message }));
       });
     };
 
     if (request.action === "extractAndRewrite") {
-      addLog('info', `收到链接提取请求: ${request.promptType}`);
+      addLog('info', 'extract_link_request', [request.promptType]);
       const originalText = request.contextData ? (request.contextData.text || '') : '';
       const urlMatch = originalText.match(/(https?:\/\/[^\s]+)/);
       const url = urlMatch ? urlMatch[0] : '';
-      
+
       if (!url) {
         executeMagicPromptCore(request, originalText, sender.tab);
         return true;
       }
-      
-      chrome.storage.local.get(['apiKey'], (res) => {
+
+      chrome.storage.local.get(['apiKey', 'datahubApiKey'], (res) => {
         const isComplexPlatform = url.match(/(zhihu\.com|feishu\.cn|mp\.weixin\.qq\.com|douyin\.com|bilibili\.com|xiaohongshu\.com|xhslink\.com|tiktok\.com|kuaishou\.com|reddit\.com)/i);
-        
-        const DATAHUB_API_KEY = "zUBzC9YgT9f8VLrh"; 
-        
-        const useDatahub = isComplexPlatform;
-        
+        const datahubApiKey = String(res.datahubApiKey || '').trim();
+        const useDatahub = Boolean(isComplexPlatform && datahubApiKey);
         let fetchPromise;
+
         if (useDatahub) {
-          addLog('info', `[分流路由] 检测到复杂/音视频链接，提交 DataHub 异步提取任务...`);
-          
-          fetchPromise = fetch('https://datahub.codes/api/datahub/execute/v0', {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'X-API-Key': DATAHUB_API_KEY 
-            },
-            body: JSON.stringify({ query: `提取这个链接的内容：${url}`, channel: 'ChipStar' })
-          })
-          .then(res => {
-            if (!res.ok) throw new Error(`DataHub 提交失败 HTTP ${res.status}`);
-            return res.json();
-          })
-          .then(async (data) => {
-            const processId = data.processId || data.id || (data.data && data.data.processId);
-            if (!processId) throw new Error("未获取到 DataHub processId: " + JSON.stringify(data));
-            
-            addLog('info', `[分流路由] 任务提交成功，正在等待 DataHub 解析完成...`);
-            let attempts = 0;
-            const maxAttempts = 90; // 最多轮询 3 分钟 (180s)
-            while (attempts < maxAttempts) {
-              await new Promise(r => setTimeout(r, 2000));
-              attempts++;
-              
-              const pollRes = await fetch(`https://datahub.codes/api/processes/${processId}.md?key=${DATAHUB_API_KEY}`);
-              if (pollRes.status === 200) {
-                 const text = await pollRes.text();
-                 if (text.includes('*此过程文件为最终版本。*') || text.includes('此过程文件为最终版本')) {
-                   return text;
-                 }
-                 continue;
-              } else if (pollRes.status === 404 || pollRes.status === 202 || pollRes.status === 400) {
-                 continue;
-              } else {
-                 throw new Error(`轮询失败 HTTP ${pollRes.status}`);
-              }
-            }
-            throw new Error("DataHub 解析超时");
+          fetchPromise = fetchDataHubExtractedText(url, datahubApiKey).catch((error) => {
+            addLog('warn', 'datahub_fallback_jina', [error.message]);
+            return fetchJinaExtractedText(url);
           });
         } else {
-          addLog('info', `[分流路由] 走常规图文提取 Jina API...`);
-          fetchPromise = fetch(`https://r.jina.ai/${url}`, {
-            method: 'GET',
-            headers: { 'Accept': 'text/plain' },
-            signal: AbortSignal.timeout(15000)
-          }).then(apiRes => {
-            if (!apiRes.ok) throw new Error(`Jina HTTP ${apiRes.status}`);
-            return apiRes.text();
-          });
+          if (isComplexPlatform) addLog('warn', 'datahub_key_missing_fallback');
+          fetchPromise = fetchJinaExtractedText(url);
         }
-        
+
         fetchPromise.then(text => {
           const cleanText = (text || '').trim().substring(0, 100000);
           const userSupplement = originalText.replace(url, '').trim();
@@ -311,76 +323,74 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
           if (userSupplement) {
              enhancedText += `\n\n[用户补充说明]: ${userSupplement}`;
           }
-          
+
           if (cleanText.length < 10 && !userSupplement) {
              throw new Error("网页提取失败或内容为空");
           }
-          
+
           if (!res.apiKey || res.apiKey.trim() === '') {
-            addLog('success', `[提取体验模式] 提取成功 (${cleanText.length} 字符)。未配置 API，已跳过大模型。`);
+            addLog('success', 'extract_trial_success', [cleanText.length]);
             sendResponse({ success: true, result: `【纯提取体验模式】\n您尚未配置 AI API Key，无法进行大模型改写。以下是直接为您从网页中提取的纯文本内容：\n\n--------------------------\n\n${cleanText}` });
           } else {
-            addLog('success', `成功提取链接内容 (${cleanText.length} 字符)，进入重写流程...`);
+            addLog('success', 'link_extract_success', [cleanText.length]);
             executeMagicPromptCore(request, enhancedText, sender.tab);
           }
         })
         .catch(error => {
-          addLog('error', `链接提取失败: ${error.message}`);
+          addLog('error', 'link_extract_failed', [error.message]);
           sendResponse({ success: false, error: 'EXTRACTION_LIMITED', message: '该链接内容受限或包含人机验证，请尝试手动复制文本进行仿写~' });
         });
       });
     } else {
-      addLog('info', `收到魔法指令请求: ${request.promptType}`);
+      addLog('info', 'magic_prompt_request', [request.promptType]);
       const textToProcess = request.contextData ? (request.contextData.text || request.contextData.bio || '') : '';
       executeMagicPromptCore(request, textToProcess, sender.tab);
     }
     return true;
   } else if (request.action === "rewriteTweet") {
-    addLog('info', `收到推文改写请求，文风人设: ${request.archetype}，句式流派: ${request.style}`);
-    
-    const prompt = `你是一个顶级的 X.com (Twitter) 内容增长专家，拥有极强的爆款改写与文风重构能力。
-请根据以下【原推内容】，结合主人选定的【文风人设】、【句式流派】以及【个性化要求】，重构改写生成一条全新的、极其抓人眼球的 X.com 帖子。
+    addLog('info', 'rewrite_request_received', [request.archetype, request.style]);
 
-【原推内容】：
-作者：@${request.author}
-内容：${request.text}
+    const prompt = buildDirectRewritePrompt({
+      author: request.author,
+      text: request.text,
+      archetypeLabel: request.archetypeLabel,
+      styleLabel: request.styleLabel,
+      customPrompt: request.customPrompt
+    });
 
-【改写策略】：
-文风策略人设：${request.archetypeLabel}
-表达句式流派：${request.styleLabel}
-个性化指令：${request.customPrompt || '无特殊指令'}
-
-【极其严格的反AI味与排版约束】：
-- 绝对禁止使用任何典型的AI套话，包括但不限于：“在这个瞬息万变的时代”、“深入探讨”、“不仅...而且”、“总而言之”、“毋庸置疑”、“赋能”、“底层逻辑”、“值得注意的是”、“让我们一起”。
-- 【Hook（钩子）至上】：开头必须是反常识观点、情绪暴论或信息落差，直接抓人眼球。绝对禁止使用“冷知识：”、“划重点：”等俗套开头。
-- 句子必须极其口语化、接地气。允许存在适当的口语化破绽和情绪宣泄。
-- 【视觉呼吸感】：长文本必须频繁分段！每一句话或每两句话之间**必须**留出空行。绝不要把多句话挤在一团，以此拉长读者在推文上的停留时间。
-- 【排版强迫症】：中英混排必须加空格。在情绪爆发点极其自然地加上1-2个Emoji。
-- **绝对禁忌一：绝对禁止生成任何 #标签 (Hashtag)！**
-- **绝对禁忌二：绝对禁止在生成正文中包含任何外部 URL 链接（外链会被平台严厉限流惩罚）！原有的外链请用文字概括。**
-- 禁用 Markdown 加粗或斜体（* 或 **）。
-
-【写作约束】：
-- 必须以第一人称叙述，饱含干货/洞察/故事/数字。
-- 如果原推在分享干货、教程或数据，请务必将其提炼为条理清晰的列表（Bullet Points），这能极大触发读者的“收藏（Bookmark）”行为，获取高算法权重。
-- 直接输出改写后的推文文本，绝对不要带有任何“以下是改写后的内容：”或“好的，为您改写：”等废话前缀。`;
-
-    chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'engineLanguage'], (config) => {
+    chrome.storage.local.get([
+      'apiKey', 'apiProvider', 'aiModel', 'engineLanguage',
+      'styleTrainingData', 'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes',
+      'aiPersona', 'agentMemory', 'aiMemory', 'accountBio', 'leadTarget',
+      'onboardingStrategy', 'competitorReport', 'accountPerformanceBaseline'
+    ], (config) => {
       let langConstraint = '';
-      if (config.engineLanguage === 'en') langConstraint = '\n【语言约束】：You MUST rewrite in English.';
-      else if (config.engineLanguage === 'ja') langConstraint = '\n【语言约束】：You MUST rewrite in Japanese (日本語).';
-      else if (config.engineLanguage === 'es') langConstraint = '\n【语言约束】：You MUST rewrite in Spanish (Español).';
-      else if (config.engineLanguage === 'id') langConstraint = '\n【语言约束】：You MUST rewrite in Indonesian (Bahasa Indonesia).';
-      else if (config.engineLanguage === 'zh') langConstraint = '\n【语言约束】：必须使用中文重写。';
-      else langConstraint = '\n【语言约束】：请自动识别原文语言并使用相同语言重写。';
-      
-      callLLM(prompt + langConstraint, config)
+      const rawEngineLanguage = config.engineLanguage || 'auto';
+      config.engineLanguage = normalizeEngineLanguage(rawEngineLanguage, globalThis.navigator?.language || '');
+      const generationContext = buildGenerationContext(config, { promptType: 'viral_rewrite' });
+      langConstraint = getLanguageInstruction(config.engineLanguage, 'rewrite', globalThis.navigator?.language || '');
+      const inputLockConstraint = buildInputLockedRewriteRules(request.text || '', config.engineLanguage);
+      const finalPrompt = buildStudioPrompt({
+        promptType: 'viral_rewrite',
+        promptPrefix: prompt,
+        textToProcess: request.text || '',
+        config,
+        generationContext,
+        langConstraint,
+        inputLockConstraint,
+        strictAntiAI: `\n\n${getPromptText(config.engineLanguage, 'rewriteStrictRules', {}, globalThis.navigator?.language || '')}`,
+        includePerformanceMemory: true,
+        includeTopPerformanceSamples: false,
+        sourceLabel: '【原推内容 - 唯一主题来源】'
+      });
+
+      callLLM(finalPrompt, config)
         .then(rewrittenText => {
-          addLog('success', '推文 AI 改写生成完成');
+          addLog('success', 'rewrite_generation_complete');
           sendResponse({ success: true, rewrittenText });
         })
         .catch(error => {
-          addLog('error', `推文 AI 改写失败: ${error.message}`);
+          addLog('error', 'rewrite_generation_failed', [error.message]);
           sendResponse({ success: false, error: error.message });
         });
     });
@@ -389,10 +399,14 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
     context.handleAgentChat(request.message || '')
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => {
-        addLog('error', `Agent 对话失败: ${error.message}`);
+        addLog('error', 'agent_chat_failed', [error.message]);
         sendResponse({ success: false, error: error.message });
       });
     return true;
   }
   return false;
 }
+
+export {
+  buildInputLockedRewriteRules
+};
