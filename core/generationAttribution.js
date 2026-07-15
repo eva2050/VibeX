@@ -89,6 +89,12 @@ function buildStudioSessionFromResult({
     judge: result.judge || null,
     repaired: Boolean(result.repaired),
     quality: result.quality || null,
+    contentSkillId: result.contentSkill?.id || '',
+    contentSkillVersion: result.contentSkill?.version || '',
+    contentFamily: result.contentFamily || '',
+    candidateStrategyIds: Array.isArray(result.candidateStrategyIds)
+      ? result.candidateStrategyIds
+      : [],
     engineLanguage,
     createdAt: now,
     updatedAt: now

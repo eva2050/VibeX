@@ -78,13 +78,16 @@ schedulePerformanceReviewAlarm();
 
 
 // Initialize local defaults for the current local-first extension experience.
-chrome.storage.local.get(['apiKey', 'collectedTweets'], (res) => {
+chrome.storage.local.get(['apiKey', 'collectedTweets', 'leadTarget', 'contentSkillRollout'], (res) => {
   const updates = {};
   if (!res.leadTarget) {
     updates.leadTarget = 'VibeX Growth';
   }
   if (!res.collectedTweets) {
     updates.collectedTweets = [];
+  }
+  if (!res.contentSkillRollout || typeof res.contentSkillRollout !== 'object') {
+    updates.contentSkillRollout = { zhPost: false };
   }
   
   chrome.storage.local.set(updates);

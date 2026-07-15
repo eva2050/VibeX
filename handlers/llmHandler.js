@@ -8,6 +8,8 @@ import { getBannedClichePhrasesRule } from '../core/contentRules.js';
 import { buildStudioPrompt, buildStudioRegenerateInstruction } from '../core/studioPrompt.js';
 import { orchestrateStudioGeneration } from '../core/studioGeneration.js';
 import { buildStudioSessionFromResult } from '../core/generationAttribution.js';
+import { resolveContentSkill } from '../core/contentSkills/registry.js';
+import '../core/contentSkills/zh/postSkill.js';
 import { fetchWithTimeout } from '../utils/fetchUtils.js';
 
 function prependGenerationSession(session) {
@@ -194,7 +196,7 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
         'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes', 'replyStrategy',
         'customPromptGlobal', 'aiPersona', 'aiMemory', 'agentMemory',
         'accountBio', 'leadTarget', 'onboardingStrategy', 'competitorReport',
-        'accountPerformanceBaseline', 'xAuth'
+        'accountPerformanceBaseline', 'xAuth', 'contentSkillRollout'
       ], async (config) => {
         if (!config.apiKey || config.apiKey.trim() === '' || config.apiKey.startsWith('mock-')) {
           sendResponse({ success: false, error: 'ERR_MISSING_API_KEY' });
@@ -272,6 +274,14 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
 
         if (['viral_rewrite', 'draft_reply'].includes(req.promptType)) {
           const generationId = `gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const contentSkill = req.promptType === 'viral_rewrite'
+            && config.contentSkillRollout?.zhPost === true
+            ? resolveContentSkill({
+              language: config.engineLanguage,
+              format: 'post',
+              objective: 'studio_rewrite'
+            })
+            : null;
           try {
             const result = await orchestrateStudioGeneration({
               promptType: req.promptType,
@@ -284,7 +294,8 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
               inputLockConstraint,
               strictAntiAI,
               regenerateConstraint,
-              includePerformanceMemory: req.promptType === 'viral_rewrite'
+              includePerformanceMemory: req.promptType === 'viral_rewrite',
+              contentSkill
             }, {
               callModel: prompt => callLLM(prompt, config, false),
               onPhase: (phase) => {
