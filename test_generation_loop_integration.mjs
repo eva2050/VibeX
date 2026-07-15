@@ -15,6 +15,7 @@ import {
 } from './core/generationAttribution.js';
 import { shouldSchedulePerformanceReview } from './core/performanceReviewScheduler.js';
 import { buildRelationshipInteraction } from './core/relationshipLoop.js';
+import { buildChinesePostReleaseReport } from './scripts/run_chinese_post_benchmark.mjs';
 
 assert.equal(REWRITE_CANDIDATE_BRIEFS.length, 3);
 assert.equal(REPLY_CANDIDATE_BRIEFS.length, 2);
@@ -46,6 +47,22 @@ assert.doesNotMatch(
   background,
   /alarm\.name === PERFORMANCE_REVIEW_ALARM[\s\S]{0,240}!res\.isRunning/
 );
+
+const skillReport = buildChinesePostReleaseReport({
+  outputs: [],
+  currentResults: [],
+  skillResults: [],
+  judgments: [],
+  commit: 'test-commit',
+  generatedAt: '2026-07-15T00:00:00.000Z'
+});
+assert.equal(skillReport.skillId, 'zh-x-post');
+assert.equal(skillReport.skillVersion, '1.0.0');
+assert.equal(typeof skillReport.releaseGate.deterministicPassed, 'boolean');
+assert.ok(['passed', 'failed', 'credentials_required'].includes(skillReport.liveBlindComparison.status));
+assert.equal(skillReport.liveBlindComparison.winRate ?? null, null);
+assert.equal(skillReport.releaseDecision.status, 'hold');
+assert.equal(skillReport.releaseDecision.rolloutEnabled, false);
 
 globalThis.window = {};
 await import('./options/locales.js');
