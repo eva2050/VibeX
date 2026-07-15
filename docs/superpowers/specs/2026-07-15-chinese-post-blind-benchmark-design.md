@@ -35,6 +35,7 @@ The Skill passes only when all conditions are true:
 - template hit rate is at most 10%;
 - all 24 fixtures have both valid current and Skill outputs;
 - all 10 required human decisions are complete;
+- at least 18 of the 24 final comparisons are non-ties;
 - the benchmark used one identical provider, model, language, account context, and generation configuration for both arms.
 
 A blind win cannot compensate for a deterministic safety failure. An incomplete or interrupted run remains `in_progress` or `blocked`; it cannot pass.
@@ -80,7 +81,7 @@ A model decision is considered stable only when both order-reversed judgments re
 
 The runner selects exactly 10 fixtures for human review in this order:
 
-1. all model-judge disagreements;
+1. model-judge disagreements, ordered from the smallest combined confidence margin upward;
 2. then the smallest stable confidence gaps until 10 fixtures are selected.
 
 The internal review page displays only:
@@ -90,7 +91,7 @@ The internal review page displays only:
 - controls for A, B, or tie;
 - review progress.
 
-It does not reveal Skill identity, model scores, generation metadata, or prior decisions until the review is complete. A human choice overrides both model judgments for that fixture. The remaining 14 fixtures count only when both model judgments agree; otherwise they are excluded and the run cannot satisfy the completeness gate.
+It does not reveal Skill identity, model scores, generation metadata, or prior decisions until the review is complete. A human choice overrides both model judgments for that fixture. Among the remaining 14 fixtures, order-reversed judge disagreements count as ties. This preserves the 10-review limit without pretending an unstable model decision is a win. The run fails the minimum-decisive-sample gate when fewer than 18 final comparisons are non-ties.
 
 ## Final Scoring
 
@@ -100,7 +101,7 @@ The primary metric is:
 
 `skill wins / (skill wins + current wins)`
 
-Ties are reported and excluded from the win-rate denominator. The report also breaks results down by the six content families and includes:
+Ties are reported and excluded from the win-rate denominator. Deterministic safety metrics are calculated on the 24 final Skill-arm outputs, not on the current arm. The report also breaks results down by the six content families and includes:
 
 - valid comparison count;
 - Skill wins, current wins, and ties;
@@ -136,7 +137,7 @@ The benchmark lives in an internal Options tools section and is not shown in the
 
 The interface has three states:
 
-1. **Setup:** shows the fixed 24-fixture scope, configured provider/model, approximate 240 model calls, and a start button.
+1. **Setup:** shows the fixed 24-fixture scope, configured provider/model, a minimum of 240 model calls, up to 288 calls when every Studio arm requires its one allowed repair, and a start button. Provider retries are reported separately.
 2. **Running:** shows completed fixtures, current phase, failures, retry status, pause/resume, and estimated remaining calls.
 3. **Review/report:** presents the 10 anonymous human comparisons, then reveals aggregate and per-family results after completion.
 
@@ -154,9 +155,9 @@ Normal Studio users see no additional controls or required steps.
 
 ## Rollout Behavior
 
-When all gates pass, the extension updates the current installation to enable `contentSkillRollout.zhPost` for Studio Post generation. Auto Post continues to receive no rollout authorization in this phase.
+When all gates pass, the extension updates the current installation to enable `contentSkillRollout.zhPostStudio` for Studio Post generation. Auto Post continues to receive no rollout authorization in this phase.
 
-To preserve that separation, the rollout schema will distinguish Studio from Auto rather than using one shared boolean. Existing installations with the old `{ zhPost: false }` value migrate to both modes disabled. A successful benchmark enables only the Studio-specific flag.
+To preserve that separation, the rollout schema is `{ zhPostStudio: boolean, zhPostAuto: boolean }`. Existing installations replace the legacy shared `zhPost` value with both new flags set to `false`, because the legacy flag cannot prove which surface was authorized. A successful benchmark sets only `zhPostStudio: true`; it never changes `zhPostAuto`.
 
 When the run fails or remains incomplete, both modes stay disabled. The report identifies the weakest content families and representative losses for Skill iteration.
 
