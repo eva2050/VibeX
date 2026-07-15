@@ -6,8 +6,30 @@ import { buildLegacyReplyStrategyPrompt } from '../core/replyStrategies.js';
 import { buildDirectRewritePrompt, buildViralRewritePromptPrefix } from '../core/rewritePrompts.js';
 import { getBannedClichePhrasesRule } from '../core/contentRules.js';
 import { buildStudioPrompt, buildStudioRegenerateInstruction } from '../core/studioPrompt.js';
-import { assessStudioOutputQuality } from '../core/studioQuality.js';
+import { orchestrateStudioGeneration } from '../core/studioGeneration.js';
+import { buildStudioSessionFromResult } from '../core/generationAttribution.js';
 import { fetchWithTimeout } from '../utils/fetchUtils.js';
+
+function prependGenerationSession(session) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ generationSessions: [] }, (items) => {
+      const sessions = (Array.isArray(items.generationSessions) ? items.generationSessions : [])
+        .filter(item => item?.id !== session.id);
+      const generationSessions = [session, ...sessions].slice(0, 100);
+      chrome.storage.local.set({ generationSessions }, () => resolve(session));
+    });
+  });
+}
+
+function notifyStudioPhase(phase, streamId = '') {
+  const message = { action: 'studioGenerationPhase', phase, streamId };
+  try {
+    const result = chrome.runtime.sendMessage(message);
+    if (result?.catch) result.catch(() => {});
+  } catch (_) {
+    // The requesting extension page may have closed while generation continued.
+  }
+}
 
 function detectInputLanguage(text = '') {
   const source = String(text || '')
@@ -162,8 +184,8 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
         'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes', 'replyStrategy',
         'customPromptGlobal', 'aiPersona', 'aiMemory', 'agentMemory',
         'accountBio', 'leadTarget', 'onboardingStrategy', 'competitorReport',
-        'accountPerformanceBaseline'
-      ], (config) => {
+        'accountPerformanceBaseline', 'xAuth'
+      ], async (config) => {
         if (!config.apiKey || config.apiKey.trim() === '' || config.apiKey.startsWith('mock-')) {
           sendResponse({ success: false, error: 'ERR_MISSING_API_KEY' });
           return;
@@ -188,7 +210,8 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
           case 'viral_rewrite':
             promptPrefix = buildViralRewritePromptPrefix({
               errorMsgText,
-              persona: config.aiPersona || {}
+              persona: config.aiPersona || {},
+              engineLanguage: config.engineLanguage
             });
             break;
           case 'analyze_style':
@@ -237,54 +260,54 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
           ? buildInputLockedRewriteRules(textToProcess, config.engineLanguage)
           : '';
 
-        const finalPrompt = ['viral_rewrite', 'draft_reply'].includes(req.promptType)
-          ? buildStudioPrompt({
-            promptType: req.promptType,
-            promptPrefix,
-            textToProcess,
-            config,
-            generationContext,
-            langConstraint,
-            inputLockConstraint,
-            strictAntiAI,
-            regenerateConstraint,
-            includePerformanceMemory: req.promptType === 'viral_rewrite',
-            includeTopPerformanceSamples: false
-          })
-          : promptPrefix + langConstraint + '\n\n【待处理文本】：\n' + textToProcess;
-
-        callLLM(finalPrompt, config, false, (chunk) => {
-          if (senderTab && senderTab.id) {
-            chrome.tabs.sendMessage(senderTab.id, { action: 'magicPromptStreamChunk', chunk: chunk }).catch(()=>null);
-          } else {
-            chrome.runtime.sendMessage({ action: 'magicPromptStreamChunk', chunk: chunk });
-            chrome.tabs.query({active: true}, (tabs) => {
-              tabs.forEach(tab => {
-                chrome.tabs.sendMessage(tab.id, { action: 'magicPromptStreamChunk', chunk: chunk }).catch(()=>null);
-              });
+        if (['viral_rewrite', 'draft_reply'].includes(req.promptType)) {
+          const generationId = `gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          try {
+            const result = await orchestrateStudioGeneration({
+              promptType: req.promptType,
+              promptPrefix,
+              sourceText: textToProcess,
+              config,
+              generationContext,
+              engineLanguage: config.engineLanguage,
+              langConstraint,
+              inputLockConstraint,
+              strictAntiAI,
+              regenerateConstraint,
+              includePerformanceMemory: req.promptType === 'viral_rewrite'
+            }, {
+              callModel: prompt => callLLM(prompt, config, false),
+              onPhase: phase => notifyStudioPhase(phase, req.streamId || '')
             });
+            const xUser = config.xAuth?.user || {};
+            const session = buildStudioSessionFromResult({
+              generationId,
+              promptType: req.promptType,
+              accountId: String(xUser.id || xUser.username || ''),
+              sourceText: textToProcess,
+              inputContext: req.contextData || {},
+              result,
+              engineLanguage: config.engineLanguage
+            });
+            await prependGenerationSession(session);
+            notifyStudioPhase('complete', req.streamId || '');
+            sendResponse({
+              success: true,
+              result: result.text,
+              generationSession: session,
+              candidates: result.candidates,
+              quality: result.quality
+            });
+          } catch (error) {
+            notifyStudioPhase('failed', req.streamId || '');
+            sendResponse({ success: false, error: error.message });
           }
-        })
-          .then(result => {
-             if (senderTab && senderTab.id) {
-               chrome.tabs.sendMessage(senderTab.id, { action: 'magicPromptStreamEnd' }).catch(()=>null);
-             } else {
-               chrome.runtime.sendMessage({ action: 'magicPromptStreamEnd' });
-               chrome.tabs.query({active: true}, (tabs) => {
-                 tabs.forEach(tab => {
-                   chrome.tabs.sendMessage(tab.id, { action: 'magicPromptStreamEnd' }).catch(()=>null);
-                 });
-               });
-             }
-             const cleanResult = result.replace(/\*\*/g, '').replace(/__/g, '');
-             const quality = ['viral_rewrite', 'draft_reply'].includes(req.promptType)
-               ? assessStudioOutputQuality(textToProcess, cleanResult, { rules: { requireConcreteSignal: req.promptType === 'viral_rewrite' } })
-               : { approved: true, issues: [] };
-             if (!quality.approved) {
-               addLog('warn', 'studio_quality_guard_warning', [quality.issues.join(', ')]);
-             }
-             sendResponse({ success: true, result: cleanResult, quality });
-          })
+          return;
+        }
+
+        const finalPrompt = promptPrefix + langConstraint + '\n\n【待处理文本】：\n' + textToProcess;
+        callLLM(finalPrompt, config, false)
+          .then(result => sendResponse({ success: true, result, quality: { approved: true, issues: [] } }))
           .catch(error => sendResponse({ success: false, error: error.message }));
       });
     };

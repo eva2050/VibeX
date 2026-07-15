@@ -382,6 +382,68 @@ body {
   padding: 16px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
+  min-height: 88px;
+  white-space: pre-wrap;
+  outline: none;
+}
+
+.generation-result:focus {
+  border-color: var(--text-sub);
+  box-shadow: 0 0 0 3px rgba(15, 15, 15, 0.06);
+}
+
+.generation-result.is-generating {
+  opacity: 0.62;
+}
+
+.studio-generation-phase {
+  min-height: 20px;
+  margin-top: 8px;
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
+.generation-candidates {
+  margin-top: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-color);
+}
+
+.generation-candidates summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
+.generation-candidate-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.generation-candidate-option {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text-main);
+  text-align: left;
+  white-space: pre-wrap;
+  cursor: pointer;
+}
+
+.generation-candidate-option.is-selected {
+  border-color: var(--text-main);
+}
+
+.generation-candidate-score {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-sub);
+  font-size: 11px;
 }
 
 .generation-actions {

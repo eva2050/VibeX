@@ -2,6 +2,12 @@ import { getCurrentLang, t, translateBackendLog, applyLanguage } from './ui/i18n
 import { renderLogs, addLog, renderVault, renderAiMemory } from './ui/logs.js';
 import { loadMemory, saveMemory, bindActions, updatePreflightStatus, updateEngineBadge, addStyleItem, setupCustomSelects, applyTheme, updateApiStatusIndicator, resetCustomPrompt, renderProfileFields, renderStyleTrainingList, updateXAuthStatusUI } from './ui/settings.js';
 import { POST_CONTENT_MODE, POST_ORIGIN, POST_STATUS, normalizePostRecord } from '../core/storageSchema.js';
+import {
+  buildVaultRecordFromSession,
+  recordGenerationAction,
+  selectGenerationCandidate,
+  updateGenerationSessionText
+} from '../core/generationAttribution.js';
 
 /**
  * VibeX - Main Controller
@@ -13,6 +19,131 @@ export function setCurrentContext(ctx) { currentContext = ctx; }
 export let originalAIOutput = '';
 export function setOriginalAIOutput(val) { originalAIOutput = val; }
 export let lastActionType = '';
+export let currentGenerationSession = null;
+
+function upsertStoredGenerationSession(session) {
+  if (!session || typeof chrome === 'undefined' || !chrome.storage) return Promise.resolve(session);
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ generationSessions: [] }, (items) => {
+      const existing = Array.isArray(items.generationSessions) ? items.generationSessions : [];
+      const generationSessions = [
+        session,
+        ...existing.filter(item => item?.id !== session.id)
+      ].slice(0, 100);
+      chrome.storage.local.set({ generationSessions }, () => resolve(session));
+    });
+  });
+}
+
+export async function persistCurrentGenerationText(text = '') {
+  if (!currentGenerationSession) return null;
+  currentGenerationSession = updateGenerationSessionText(
+    currentGenerationSession,
+    text,
+    Date.now()
+  );
+  await upsertStoredGenerationSession(currentGenerationSession);
+  return currentGenerationSession;
+}
+
+async function markCurrentGenerationAction(action) {
+  if (!currentGenerationSession) return null;
+  currentGenerationSession = recordGenerationAction(
+    currentGenerationSession,
+    action,
+    Date.now()
+  );
+  await upsertStoredGenerationSession(currentGenerationSession);
+  return currentGenerationSession;
+}
+
+export async function copyCurrentGenerationText() {
+  const resultBox = document.getElementById('generation-result');
+  const text = resultBox?.textContent?.trim() || '';
+  if (!text) return false;
+  await persistCurrentGenerationText(text);
+  await markCurrentGenerationAction('copy');
+  await navigator.clipboard.writeText(text);
+  showToast(t('toast_copied', 'Copied'), 'system');
+  return true;
+}
+
+export async function saveCurrentGenerationToVault() {
+  const resultBox = document.getElementById('generation-result');
+  const text = resultBox?.textContent?.trim() || '';
+  if (!text || !currentGenerationSession) return null;
+  await persistCurrentGenerationText(text);
+  await markCurrentGenerationAction('save');
+  const record = buildVaultRecordFromSession(currentGenerationSession);
+
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ draftVault: [] }, (items) => {
+      const existing = Array.isArray(items.draftVault) ? items.draftVault : [];
+      const draftVault = [
+        record,
+        ...existing.filter(item => item?.generationId !== record.generationId)
+      ].slice(0, 100);
+      chrome.storage.local.set({ draftVault }, () => {
+        if (!currentGenerationSession.feedbackRecordedAt
+          && currentGenerationSession.selectedText.trim() !== currentGenerationSession.finalText.trim()) {
+          recordFeedbackLoop(
+            currentGenerationSession.selectedText,
+            currentGenerationSession.finalText,
+            { data: { text: currentGenerationSession.inputText } }
+          );
+          currentGenerationSession = {
+            ...currentGenerationSession,
+            feedbackRecordedAt: Date.now()
+          };
+          upsertStoredGenerationSession(currentGenerationSession);
+        }
+        renderVault(draftVault);
+        resolve(record);
+      });
+    });
+  });
+}
+
+export function renderGenerationCandidates(session = currentGenerationSession) {
+  const details = document.getElementById('generation-candidates');
+  const list = document.getElementById('generation-candidate-list');
+  if (!details || !list) return;
+  list.textContent = '';
+  const candidates = Array.isArray(session?.candidates) ? session.candidates : [];
+  if (candidates.length < 2) {
+    details.classList.add('hidden');
+    details.open = false;
+    return;
+  }
+  const scoreById = new Map(
+    (session?.judge?.scores || []).map(score => [score.id, Number(score.total) || 0])
+  );
+  candidates.forEach((candidate) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'generation-candidate-option';
+    if (candidate.id === session.selectedCandidateId) button.classList.add('is-selected');
+    const score = document.createElement('span');
+    score.className = 'generation-candidate-score';
+    score.textContent = `${candidate.id} · ${scoreById.get(candidate.id) || 0}/100`;
+    button.appendChild(score);
+    button.appendChild(document.createTextNode(candidate.text || ''));
+    button.addEventListener('click', async () => {
+      currentGenerationSession = selectGenerationCandidate(
+        currentGenerationSession,
+        candidate.id,
+        Date.now()
+      );
+      const resultBox = document.getElementById('generation-result');
+      if (resultBox) resultBox.textContent = currentGenerationSession.finalText;
+      originalAIOutput = currentGenerationSession.selectedText;
+      await upsertStoredGenerationSession(currentGenerationSession);
+      renderGenerationCandidates(currentGenerationSession);
+    });
+    list.appendChild(button);
+  });
+  details.classList.remove('hidden');
+}
 
 // Helper: Toast notification
 export function showToast(message, type = 'system') {
@@ -350,6 +481,17 @@ function setupContextListener() {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'updateContext') {
       handleNewContext(request.contextType, request.data);
+    } else if (request.action === 'studioGenerationPhase') {
+      if (request.streamId && request.streamId !== window.currentStreamId) return;
+      const phase = document.getElementById('studio-generation-phase');
+      const labels = {
+        generating_candidates: 'Generating candidates…',
+        judging_candidates: 'Reviewing candidates…',
+        repairing_candidate: 'Repairing the best draft…',
+        complete: 'Ready',
+        failed: 'Generation failed'
+      };
+      if (phase) phase.textContent = labels[request.phase] || '';
     }
   });
 }
@@ -389,6 +531,7 @@ export function executeMagicAction(actionType, isRegenerate = false) {
   const zone = document.getElementById('generation-zone');
   const loader = document.getElementById('generation-loader');
   const resultBox = document.getElementById('generation-result');
+  const previousResult = resultBox.textContent;
 
   // Clear like/dislike feedback button states on new generation
   document.getElementById('btn-feedback-like')?.classList.remove('active', 'primary');
@@ -409,7 +552,10 @@ export function executeMagicAction(actionType, isRegenerate = false) {
   zone.classList.remove('hidden');
   loader.classList.remove('hidden');
   resultBox.classList.remove('hidden');
-  resultBox.textContent = '';
+  resultBox.classList.add('is-generating');
+  resultBox.setAttribute('contenteditable', 'false');
+  const phase = document.getElementById('studio-generation-phase');
+  if (phase) phase.textContent = isUrl ? 'Extracting source…' : 'Generating candidates…';
 
   const badgesContainer = document.getElementById('generation-quality-badges');
   if (badgesContainer) {
@@ -417,12 +563,9 @@ export function executeMagicAction(actionType, isRegenerate = false) {
     badgesContainer.classList.add('hidden');
   }
 
-  const loadingTextEl = loader.querySelector('div:last-child');
   if (isUrl) {
-    if (loadingTextEl) loadingTextEl.textContent = '正在提取并解析 URL 内容...';
     addLog('url_detected', 'system');
   } else {
-    if (loadingTextEl) loadingTextEl.textContent = '✨ 正在生成爆款文案...';
     addLog('executing_action', 'system', [actionType]);
   }
 
@@ -437,6 +580,8 @@ export function executeMagicAction(actionType, isRegenerate = false) {
       streamId: window.currentStreamId
     }, (response) => {
       loader.classList.add('hidden');
+      resultBox.classList.remove('is-generating');
+      resultBox.setAttribute('contenteditable', 'true');
       if (chrome.runtime.lastError || !response || response.error) {
         const errorMsg = chrome.runtime.lastError?.message || response?.error || response?.message;
         // Chrome MV3 5-minute timeout protection: ignore if we already got streaming chunks
@@ -445,14 +590,19 @@ export function executeMagicAction(actionType, isRegenerate = false) {
            originalAIOutput = resultBox.textContent;
            return;
         }
-        const failPrefix = t('generate_fail_prefix', '生成失败: ');
-        resultBox.textContent = failPrefix + errorMsg;
+        resultBox.textContent = previousResult;
+        showToast(`${t('generate_fail_prefix', '生成失败: ')}${errorMsg}`, 'error');
         addLog('task_failed', 'error');
         const badgesContainer = document.getElementById('generation-quality-badges');
         if (badgesContainer) badgesContainer.classList.add('hidden');
       } else {
         resultBox.textContent = response.result;
         originalAIOutput = response.result;
+        currentGenerationSession = response.generationSession || null;
+        if (currentGenerationSession) {
+          originalAIOutput = currentGenerationSession.selectedText || response.result;
+          renderGenerationCandidates(currentGenerationSession);
+        }
         addLog('task_completed_length', 'system', [response.result.length]);
 
         // Render quality badges if any
@@ -468,7 +618,9 @@ export function executeMagicAction(actionType, isRegenerate = false) {
               'no_concrete_signal': t('quality_no_signal', '信息增量不足'),
               'markdown_artifacts': t('quality_markdown', '含 Markdown 痕迹'),
               'hashtag': t('quality_hashtag', '含 hashtag'),
-              'too_many_lines': t('quality_too_many_lines', '行数过多')
+              'too_many_lines': t('quality_too_many_lines', '行数过多'),
+              'language_mismatch': '输出语言不匹配',
+              'topic_drift': '内容可能偏离原主题'
             };
             response.quality.issues.forEach(issue => {
               const badge = document.createElement('span');
@@ -478,12 +630,11 @@ export function executeMagicAction(actionType, isRegenerate = false) {
             });
             badgesContainer.classList.remove('hidden');
           }
-        } else {
-          badgesContainer.classList.add('hidden');
         }
 
         // Auto-Persist removed per user request
       }
+      if (phase) phase.textContent = response?.error ? 'Generation failed' : 'Ready';
       setTimeout(() => {
         resultBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 100);

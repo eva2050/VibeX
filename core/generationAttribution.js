@@ -103,6 +103,19 @@ function updateGenerationSessionText(session = {}, finalText = '', now = Date.no
   });
 }
 
+function selectGenerationCandidate(session = {}, candidateId = '', now = Date.now()) {
+  const candidate = (Array.isArray(session.candidates) ? session.candidates : [])
+    .find(item => item.id === candidateId);
+  if (!candidate) return normalizeGenerationSession(session);
+  return normalizeGenerationSession({
+    ...session,
+    selectedCandidateId: candidate.id,
+    selectedText: candidate.text || '',
+    finalText: candidate.text || '',
+    updatedAt: now
+  });
+}
+
 function recordGenerationAction(session = {}, action = '', now = Date.now()) {
   const field = action === 'copy'
     ? 'copiedAt'
@@ -264,5 +277,6 @@ export {
   mergeAttributedPost,
   normalizeAttributionText,
   recordGenerationAction,
+  selectGenerationCandidate,
   updateGenerationSessionText
 };

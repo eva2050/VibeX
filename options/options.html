@@ -45,10 +45,18 @@
         <div class="generation-zone hidden" id="generation-zone">
           <div class="generation-loader" id="generation-loader">
             <div class="scan-line"></div>
+            <div id="studio-generation-phase" class="studio-generation-phase" aria-live="polite"></div>
           </div>
-          <div id="generation-result" class="hover-copy-card hidden" title="点击复制文案" data-i18n-title="hint_click_copy" data-copy-hint="点击即可复制" data-i18n-attr="data-copy-hint:hint_click_copy"></div>
+          <div id="generation-result" class="generation-result hidden" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true"></div>
           <div id="generation-quality-badges" class="quality-badges hidden"></div>
+          <details id="generation-candidates" class="generation-candidates hidden">
+            <summary data-i18n="studio_other_candidates">Other candidates</summary>
+            <div id="generation-candidate-list" class="generation-candidate-list"></div>
+          </details>
           <div class="generation-actions">
+              <button class="magic-btn outline icon-only-action" id="btn-copy-result" title="Copy" aria-label="Copy">
+                <i data-lucide="copy" width="18" height="18"></i>
+              </button>
               <button class="magic-btn outline icon-only-action" id="btn-feedback-like" title="点赞：多生成这种风格" data-i18n-title="btn_like" aria-label="Like">
                 <i data-lucide="thumbs-up" width="18" height="18"></i>
               </button>

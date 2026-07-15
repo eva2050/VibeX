@@ -461,7 +461,8 @@ export function bindActions() {
       btnLike.classList.add('active', 'primary');
       document.getElementById('btn-feedback-dislike')?.classList.remove('active', 'primary');
       import('../options.js').then(module => {
-        module.recordPreferenceFeedback(module.originalAIOutput, 'like', currentContext);
+        const currentText = document.getElementById('generation-result')?.textContent?.trim();
+        module.recordPreferenceFeedback(currentText || module.originalAIOutput, 'like', currentContext);
       });
     });
   }
@@ -472,21 +473,31 @@ export function bindActions() {
       btnDislike.classList.add('active', 'primary');
       document.getElementById('btn-feedback-like')?.classList.remove('active', 'primary');
       import('../options.js').then(module => {
-        module.recordPreferenceFeedback(module.originalAIOutput, 'dislike', currentContext);
+        const currentText = document.getElementById('generation-result')?.textContent?.trim();
+        module.recordPreferenceFeedback(currentText || module.originalAIOutput, 'dislike', currentContext);
       });
     });
   }
 
   const resultBoxUI = document.getElementById('generation-result');
   if (resultBoxUI) {
-    resultBoxUI.addEventListener('click', () => {
-      const text = resultBoxUI.textContent.trim();
-      if (!text || text === '✨ 正在生成爆款文案...') return;
-      navigator.clipboard.writeText(text).then(() => {
-        showToast(t('toast_copied'), 'system');
-      }).catch(err => {
-        addLog('copy_failed', 'error', [err.message]);
-      });
+    let editTimer = null;
+    resultBoxUI.addEventListener('input', () => {
+      clearTimeout(editTimer);
+      editTimer = setTimeout(() => {
+        import('../options.js').then(module => {
+          module.persistCurrentGenerationText(resultBoxUI.textContent.trim());
+        });
+      }, 300);
+    });
+  }
+
+  const btnCopyResult = document.getElementById('btn-copy-result');
+  if (btnCopyResult) {
+    btnCopyResult.addEventListener('click', () => {
+      import('../options.js')
+        .then(module => module.copyCurrentGenerationText())
+        .catch(err => addLog('copy_failed', 'error', [err.message]));
     });
   }
 
@@ -495,22 +506,9 @@ export function bindActions() {
     btnSaveLib.addEventListener('click', () => {
       const text = document.getElementById('generation-result').textContent.trim();
       if (!text) return;
-      chrome.storage.local.get({ draftVault: [] }, (res) => {
-        const vault = res.draftVault;
-        vault.unshift(normalizePostRecord({
-          id: 'manual-' + Date.now(),
-          text: text,
-          author: 'Manual Rewrite',
-          authorName: 'Manual Rewrite',
-          source: 'Manual Rewrite',
-          origin: POST_ORIGIN.MANUAL_REWRITE,
-          contentMode: POST_CONTENT_MODE.REWRITE,
-          status: POST_STATUS.DRAFT,
-          savedAt: Date.now()
-        }));
-        const trimmedVault = vault.slice(0, 100);
-        chrome.storage.local.set({ draftVault: trimmedVault }, () => {
-          renderVault(trimmedVault);
+      import('../options.js').then(module => {
+        module.saveCurrentGenerationToVault().then((record) => {
+          if (!record) return;
           btnSaveLib.textContent = '';
           const i = document.createElement('i');
           i.dataset.lucide = 'check';
