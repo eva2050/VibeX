@@ -35,11 +35,11 @@ const STRATEGIES = Object.freeze({
   })
 });
 
-const TERRITORY_PATTERN = /AI|人工智能|模型|智能体|agent|产品|工具|软件|SaaS|独立开发|开发者|创业|创作者|内容|工作流|workflow|用户|留存|增长|变现|商业化|交付|发布|上线/i;
+const TERRITORY_PATTERN = /AI|人工智能|模型|智能体|agent|产品|工具|软件|SaaS|独立开发|开发者|创业|创作者|内容|工作流|workflow|用户|留存|增长|变现|商业化|交付|发布|上线|代码助手|知识库|Build\s*in\s*public/i;
 const UNCERTAINTY_PATTERN = /怀疑|可能|也许|或许|大概|似乎|看起来|未必|不一定|越来越觉得|我觉得|我猜|恐怕|倾向于|是否|会不会/;
 const EXPERIENCE_PATTERN = /(?:我|我们).{0,10}(?:试了|试过|用了|用过|连续做|做了|上线了|发布了|删掉|删除|改了|踩过|花了|换了|留下来|复盘了)/;
 const COMPETITION_PATTERN = /押注|押中|赌|竞争|对手|阵营|三家|两家|牌局|资源分配/;
-const STEP_PATTERN = /(?:三|四|五|六|\d+)步|第一步|第二步|第三步|先.{0,20}再.{0,20}(?:最后|然后)|(?:^|\n)\s*[1-4一二三四][.、）)]/m;
+const STEP_PATTERN = /(?:两|三|四|五|六|\d+)步|第一步|第二步|第三步|先.{0,20}再.{0,20}(?:最后|然后)|(?:^|\n)\s*[1-4一二三四][.、）)]/m;
 
 function normalizeInputText(input = {}) {
   return String(input?.text || input || '').replace(/\r/g, '').trim();
@@ -55,19 +55,19 @@ function extractEntities(text = '') {
 }
 
 function inferContentFamily(text = '') {
-  if (/Build\s*in\s*public|第\s*\d+\s*天|开发进度|本周进展|今天.{0,20}(?:上线|发布|新增|删掉|删除|修复)/i.test(text)) {
+  if (/Build\s*in\s*public|第\s*\d+\s*天|开发进度|本周进展|今天.{0,20}(?:上线|发布|新增|删掉|删除|修复|修了)/i.test(text)) {
     return 'build_in_public';
   }
-  if (/失败|踩坑|做错|没做成|冷启动.{0,8}(?:失败|没)|最大的问题|(?:这次|一次|项目|产品).{0,12}复盘|复盘.{0,12}(?:失败|问题|做错)/.test(text)) {
-    return 'failure_retrospective';
-  }
-  if (EXPERIENCE_PATTERN.test(text) && /AI|模型|产品|工具|软件|SaaS|应用/i.test(text)) {
-    return 'tool_experience';
-  }
-  if (STEP_PATTERN.test(text) || /方法|框架|流程|验证.{0,8}(?:只看|分为)/.test(text)) {
+  if (STEP_PATTERN.test(text) || /方法|框架|流程.{0,10}(?:简单|分为|：)|工作流.{0,10}(?:简单|：)|先.{0,25}再|只问(?:两|三|四|\d+)个问题|验证.{0,8}(?:只看|分为)/.test(text)) {
     return 'workflow_framework';
   }
-  if (/行业|趋势|接下来|未来|分水岭|市场|赛道|创业者|这一轮|下一个阶段/.test(text)) {
+  if (EXPERIENCE_PATTERN.test(text) && /AI|模型|产品|工具|软件|SaaS|应用|助手/i.test(text)) {
+    return 'tool_experience';
+  }
+  if (/失败|踩.{0,2}坑|做错|没做成|冷启动.{0,8}(?:失败|没)|最大的问题|(?:这次|一次|项目|产品).{0,12}复盘|复盘这次|复盘证明|复盘.{0,12}(?:失败|问题|做错)|我们花了.{0,30}却/.test(text)) {
+    return 'failure_retrospective';
+  }
+  if (/行业|趋势|接下来|未来|分水岭|市场|赛道|创业者|创业越来越|这一轮|下一轮|下一个阶段|下一个变化|独立开发.{0,12}门槛/.test(text)) {
     return 'industry_opinion';
   }
   return 'product_observation';
