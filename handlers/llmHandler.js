@@ -275,7 +275,7 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
         if (['viral_rewrite', 'draft_reply'].includes(req.promptType)) {
           const generationId = `gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
           const contentSkill = req.promptType === 'viral_rewrite'
-            && config.contentSkillRollout?.zhPost === true
+            && config.contentSkillRollout?.zhPostStudio === true
             ? resolveContentSkill({
               language: config.engineLanguage,
               format: 'post',

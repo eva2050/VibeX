@@ -19,6 +19,7 @@ import { attributeSyncedPostToVault } from './core/generationAttribution.js';
 import { REPLY_RETRY_LOCK_MS, DEFAULT_AGENT_MEMORY, AGENT_MEMORY_LABELS, GROWTH_PLAYBOOKS, DEFAULT_INTERACTION_TARGETS, PROJECT_ACCOUNT_HANDLES, DEFAULT_DISCOVERY_KEYWORDS, selectGrowthPlaybook } from './core/constants.js';
 import { setupMessageRouter } from "./handlers/messageRouter.js";
 import './core/automationState.js';
+import { normalizeContentSkillRollout } from './core/contentSkillRollout.js';
 
 const { EVENTS: REPLY_FLOW_EVENTS, buildReplyFlowTransition, hasActiveReplyFlow } = globalThis.VibeXAutomationState;
 
@@ -86,8 +87,9 @@ chrome.storage.local.get(['apiKey', 'collectedTweets', 'leadTarget', 'contentSki
   if (!res.collectedTweets) {
     updates.collectedTweets = [];
   }
-  if (!res.contentSkillRollout || typeof res.contentSkillRollout !== 'object') {
-    updates.contentSkillRollout = { zhPost: false };
+  const normalizedRollout = normalizeContentSkillRollout(res.contentSkillRollout);
+  if (JSON.stringify(res.contentSkillRollout || {}) !== JSON.stringify(normalizedRollout)) {
+    updates.contentSkillRollout = normalizedRollout;
   }
   
   chrome.storage.local.set(updates);

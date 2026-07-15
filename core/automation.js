@@ -322,7 +322,7 @@ async function generateSingleTweetDraft() {
     const randomSeed = `\n[System Random Batch Seed: ${Date.now()}-${Math.random().toString(36).substring(2)}]`;
 
     const outputLangInstruction = getLanguageName(config.engineLanguage, globalThis.navigator?.language || '');
-    const contentSkill = config.contentSkillRollout?.zhPost === true
+    const contentSkill = config.contentSkillRollout?.zhPostAuto === true
       ? resolveContentSkill({
         language: config.engineLanguage,
         format: 'post',

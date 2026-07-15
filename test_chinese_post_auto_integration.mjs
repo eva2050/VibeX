@@ -40,7 +40,7 @@ assert.deepEqual(metadata, {
 const backgroundSource = readFileSync(new URL('./background.js', import.meta.url), 'utf8');
 const automationSource = readFileSync(new URL('./core/automation.js', import.meta.url), 'utf8');
 assert.match(automationSource, /objective: 'auto_post'/);
-assert.match(automationSource, /config\.contentSkillRollout\?\.zhPost === true/);
+assert.match(automationSource, /config\.contentSkillRollout\?\.zhPostAuto === true/);
 assert.match(backgroundSource, /pendingPostMetadata/);
 assert.match(backgroundSource, /contentSkillVersion: existing\?\.contentSkillVersion/);
 const replyStart = backgroundSource.indexOf('async function generateAIResponse');

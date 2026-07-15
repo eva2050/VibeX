@@ -116,10 +116,10 @@ assert.equal(replyResult.contentSkill, undefined);
 assert.equal(replyResult.candidates.some(item => item.strategyId), false);
 
 const handlerSource = readFileSync(new URL('./handlers/llmHandler.js', import.meta.url), 'utf8');
-assert.match(handlerSource, /config\.contentSkillRollout\?\.zhPost === true/);
+assert.match(handlerSource, /config\.contentSkillRollout\?\.zhPostStudio === true/);
 assert.match(handlerSource, /objective: 'studio_rewrite'/);
 assert.match(handlerSource, /req\.promptType === 'viral_rewrite'/);
 const backgroundSource = readFileSync(new URL('./background.js', import.meta.url), 'utf8');
-assert.match(backgroundSource, /contentSkillRollout = \{ zhPost: false \}/);
+assert.match(backgroundSource, /normalizeContentSkillRollout/);
 
 console.log('Chinese post Studio integration checks passed');
