@@ -1,8 +1,9 @@
 import { memoryValueToText } from '../utils/textUtils.js';
 import { AGENT_MEMORY_LABELS, DEFAULT_AGENT_MEMORY, selectGrowthPlaybook } from './constants.js';
-import { MEMORY_FIELD_PROTOCOL, POST_CONTENT_MODE } from './storageSchema.js';
+import { LEARNING_OBJECTIVE, MEMORY_FIELD_PROTOCOL, POST_CONTENT_MODE } from './storageSchema.js';
 import { getPromptText } from './i18n.js';
 import { formatStyleSampleLearningForPrompt } from './styleLearning.js';
+import { selectActiveRules } from './learningPolicy.js';
 
 function normalizeAgentMemory(memory = {}) {
   return { ...DEFAULT_AGENT_MEMORY, ...(memory || {}) };
@@ -51,16 +52,23 @@ function getContentModeForPrompt(promptType = '') {
   return POST_CONTENT_MODE.REWRITE;
 }
 
+function getObjectiveForPrompt(promptType = '') {
+  if (promptType === 'auto_post') return LEARNING_OBJECTIVE.AUTO_POST;
+  if (promptType === 'draft_reply') return LEARNING_OBJECTIVE.STUDIO_REPLY;
+  return LEARNING_OBJECTIVE.STUDIO_REWRITE;
+}
+
 function formatPerformanceMemoryForPrompt(aiMemory = {}, options = {}) {
   const contentMode = options.contentMode || POST_CONTENT_MODE.POST;
+  const objective = options.objective || getObjectiveForPrompt(options.promptType);
+  const engineLanguage = options.engineLanguage || options.lang || 'unknown';
   const rules = Array.isArray(aiMemory?.learnedRules) ? aiMemory.learnedRules : [];
-  const relevantRules = rules.filter((rule) => {
-    if (!rule?.contentMode) return contentMode !== POST_CONTENT_MODE.REPLY;
-    if (rule.contentMode === contentMode) return true;
-    return contentMode === POST_CONTENT_MODE.REPLY && rule.contentMode === POST_CONTENT_MODE.POST;
-  });
+  const relevantRules = selectActiveRules(rules, {
+    objective,
+    contentMode,
+    engineLanguage
+  }, options.now || Date.now(), 3);
   const lines = relevantRules
-    .slice(0, 8)
     .map((rule, index) => {
       const text = truncateForPrompt(rule?.text || rule, 360);
       if (!text) return '';
@@ -206,6 +214,7 @@ function buildGenerationContext(config = {}, options = {}) {
   const promptType = options.promptType || 'auto_post';
   const contentMode = getContentModeForPrompt(promptType);
   const lang = options.lang || config.engineLanguage || 'auto';
+  const objective = options.objective || getObjectiveForPrompt(promptType);
 
   return {
     memoryProtocol: MEMORY_FIELD_PROTOCOL,
@@ -215,7 +224,15 @@ function buildGenerationContext(config = {}, options = {}) {
     playbook,
     agentMemoryPrompt: formatAgentMemoryForPrompt(agentMemory),
     contentMode,
-    performanceMemoryPrompt: formatPerformanceMemoryForPrompt(config.aiMemory, { contentMode, lang }),
+    objective,
+    performanceMemoryPrompt: formatPerformanceMemoryForPrompt(config.aiMemory, {
+      contentMode,
+      objective,
+      promptType,
+      engineLanguage: lang,
+      lang,
+      now: options.now
+    }),
     topPerformancePrompt: formatTopPostsForPrompt(config.accountPerformanceBaseline),
     playbookPrompt: formatPlaybookForPrompt(playbook),
     stylePrompt: formatStyleTrainingForPrompt(config.styleTrainingData),
@@ -230,6 +247,7 @@ function buildGenerationContext(config = {}, options = {}) {
 export {
   buildGenerationContext,
   formatAgentMemoryForPrompt,
+  getObjectiveForPrompt,
   formatPerformanceMemoryForPrompt,
   formatStyleTrainingForPrompt,
   formatTopPostsForPrompt,

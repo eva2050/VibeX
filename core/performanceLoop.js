@@ -1,4 +1,9 @@
-import { POST_CONTENT_MODE, POST_STATUS, normalizeAiMemory, normalizePostRecord } from './storageSchema.js';
+import { POST_STATUS, normalizeAiMemory, normalizePostRecord } from './storageSchema.js';
+import {
+  buildPerformanceObservation,
+  deriveLearningRules,
+  getFeatureKey
+} from './learningPolicy.js';
 
 
 function clamp(num, min, max) {
@@ -95,6 +100,7 @@ function scoreContentMultiplier(item = {}) {
 function classifyRelativePerformance(metrics = {}, baseline = {}) {
   const views = getPrimaryMetric(metrics);
   if (!views || !baseline.sampleCount) return 'unknown';
+  if (baseline.sampleCount < 5) return 'insufficient_data';
   if (baseline.p90Views && views >= baseline.p90Views) return 'top_decile';
   if (baseline.averageViews && views >= baseline.averageViews * 2) return 'breakout';
   if (baseline.averageViews && views < baseline.averageViews * 0.6) return 'below_baseline';
@@ -144,165 +150,33 @@ function inferContentFeatures(item = {}) {
   };
 }
 
-function buildLearning(item, relativePerformance) {
-  const text = item.text || '';
-  const hasLink = /https?:\/\//i.test(text);
-  const hasQuestion = /[?？]/.test(text);
-  const hasStrongHook = /(stop|never|why|truth|mistake|secret|unpopular|hot take|别|不要|为什么|真相|错了|反常识|爆款|踩坑)/i.test(text);
-
-  let reason = '';
-  let next = '';
-
-  if (relativePerformance === 'top_decile' || relativePerformance === 'breakout') {
-    if (hasStrongHook) {
-      reason = '具备强反差/情绪 Hook，抓住了用户注意力。';
-      next = '继续复用这种制造信息落差或打破常规的开头结构。';
-    } else if (hasQuestion) {
-      reason = '抛出开放性问题，引发了有效互动。';
-      next = '保留互动空间，不要把话说太满。';
-    } else {
-      reason = '行文精简且没有外链稀释流量，完读率好。';
-      next = '保持短促有力的表达。';
-    }
-  } else if (relativePerformance === 'below_baseline') {
-    if (hasLink) {
-      reason = '正文直接带外链，触发了平台降权限制。';
-      next = '核心观点留在正文，链接放进评论区。';
-    } else if (!hasStrongHook) {
-      reason = '开头过于平铺直叙，没有制造足够的冲突感或落差。';
-      next = '第一句需要更尖锐的判断或反常识结论。';
-    } else {
-      reason = '话题本身缺乏延展性，未能引发共鸣。';
-      next = '尝试切换更有痛点的主题。';
-    }
-  } else {
-    reason = '发挥稳定，受众反馈符合日常均值。';
-    next = '作为基准参考，可微调结构测试更好效果。';
+function buildLearning(item = {}, relativePerformance = '') {
+  const features = item.contentFeatures || inferContentFeatures(item);
+  const featureKey = getFeatureKey({ contentFeatures: features });
+  if (relativePerformance === 'insufficient_data') {
+    return 'Not enough comparable samples yet. Stored as an observation; no performance rule was created.';
   }
-
-  return `Reason: ${reason} | Next: ${next}`;
-}
-function getPostFingerprint(text = '') {
-  return String(text || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120);
-}
-
-function buildLearningEvent(post, relativePerformance) {
-  if (post?.learningDisabled || !post?.aiLearning || !relativePerformance || relativePerformance === 'normal' || relativePerformance === 'unknown') return null;
-  const normalizedPost = normalizePostRecord(post);
-  return {
-    id: `${post.id || post.savedAt || Date.now()}-${post.reviewedAt || Date.now()}`,
-    text: post.aiLearning,
-    sourcePostId: post.id || String(post.savedAt || Date.now()),
-    postText: getPostFingerprint(post.text),
-    contentMode: normalizedPost.contentMode || POST_CONTENT_MODE.REWRITE,
-    baseline: post.performanceBaseline || null,
-    relativePerformance: post.relativePerformance || relativePerformance,
-    contentFeatures: post.contentFeatures || inferContentFeatures(post),
-    performanceMetrics: post.performanceMetrics || getPerformanceMetrics(post),
-    actualViews: Number(post.actualViews) || 0,
-    reviewedAt: post.reviewedAt || Date.now(),
-    createdAt: Date.now()
-  };
-}
-
-function summarizeRuleText(event = {}, features = {}) {
-  if (event.text) return event.text;
-  const status = event.performanceStatus === 'underestimated' ? 'outperformed' : 'underperformed';
-  const contentType = features.contentType || 'post';
-  const hookType = features.hookType || 'hook';
-  const goal = features.goal || 'growth';
-  const metricNotes = [];
-  const metrics = event.performanceMetrics || {};
-  if (metrics.bookmarks > 0) metricNotes.push(`${metrics.bookmarks} bookmarks`);
-  if (metrics.replies > 0) metricNotes.push(`${metrics.replies} replies`);
-  if (metrics.follows > 0) metricNotes.push(`${metrics.follows} follows`);
-  const metricText = metricNotes.length ? ` with ${metricNotes.join(', ')}` : '';
-  const baselineText = event.relativePerformance && event.relativePerformance !== 'unknown'
-    ? ` (${event.relativePerformance})`
-    : '';
-  return `${contentType} posts with ${hookType} hooks for ${goal} ${status}${baselineText}${metricText}. ${event.text || ''}`.trim();
+  if (relativePerformance === 'above_cohort') {
+    return `${featureKey} was associated with above-cohort performance in this comparable sample. This is not a causal conclusion.`;
+  }
+  if (relativePerformance === 'below_cohort') {
+    return `${featureKey} was associated with below-cohort performance in this comparable sample. This is not a causal conclusion.`;
+  }
+  return 'Performance was within the comparable cohort range. No performance rule was created.';
 }
 
 function compactLearningEventsIntoRules(events = [], existingRules = []) {
-  const existingByText = new Map(
-    (Array.isArray(existingRules) ? existingRules : [])
-      .filter(rule => rule?.text)
-      .map(rule => [rule.text, rule])
-  );
-  const grouped = new Map();
-
-  (Array.isArray(events) ? events : []).forEach((event) => {
-    const features = event.contentFeatures || {};
-    const modeKey = [
-      event.contentMode || POST_CONTENT_MODE.POST,
-      features.contentType || 'unknown',
-      features.hookType || 'unknown',
-      features.goal || 'unknown',
-      event.performanceStatus || 'unknown'
-    ].join('|');
-    const text = summarizeRuleText(event, features);
-    if (!text) return;
-    const existingRule = existingByText.get(text);
-    const current = grouped.get(modeKey) || {
-      text,
-      modeKey,
-      contentMode: event.contentMode || POST_CONTENT_MODE.POST,
-      sampleCount: 0,
-      positiveCount: 0,
-      negativeCount: 0,
-      maxAbsDeviation: 0,
-      lastDeviationRatio: 0,
-      sourcePostIds: [],
-      examples: [],
-      createdAt: existingRule?.createdAt || event.createdAt || Date.now()
-    };
-
-    const ratio = Number(event.deviationRatio) || 0;
-    current.sampleCount += 1;
-    if (event.performanceStatus === 'underestimated') current.positiveCount += 1;
-    if (event.performanceStatus === 'overestimated') current.negativeCount += 1;
-    current.maxAbsDeviation = Math.max(current.maxAbsDeviation || 0, Math.abs(ratio));
-    current.lastDeviationRatio = ratio;
-    current.updatedAt = Math.max(Number(current.updatedAt) || 0, Number(event.reviewedAt || event.createdAt) || Date.now());
-    if (event.sourcePostId && !current.sourcePostIds.includes(event.sourcePostId)) {
-      current.sourcePostIds.push(event.sourcePostId);
-    }
-    if (event.postText && !current.examples.includes(event.postText)) {
-      current.examples.push(event.postText);
-    }
-    grouped.set(modeKey, current);
-  });
-
-  existingByText.forEach((rule, text) => {
-    const key = rule.modeKey || text;
-    if (!grouped.has(key)) grouped.set(key, rule);
-  });
-
-  return Array.from(grouped.values())
-    .map(rule => ({
-      ...rule,
-      contentMode: rule.contentMode || POST_CONTENT_MODE.POST,
-      sourcePostIds: Array.isArray(rule.sourcePostIds) ? rule.sourcePostIds.slice(0, 8) : [],
-      examples: Array.isArray(rule.examples) ? rule.examples.slice(0, 3) : [],
-      confidence: Math.min(95, Math.round(35 + (Number(rule.sampleCount) || 1) * 12 + (Number(rule.maxAbsDeviation) || 0) * 20))
-    }))
-    .sort((a, b) => {
-      const confidenceDiff = (Number(b.confidence) || 0) - (Number(a.confidence) || 0);
-      if (confidenceDiff !== 0) return confidenceDiff;
-      return (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0);
-    })
-    .slice(0, 12);
+  const comparableEvents = (Array.isArray(events) ? events : [])
+    .filter(event => event?.objective && event?.contentMode && event?.engineLanguage);
+  return deriveLearningRules(comparableEvents, existingRules);
 }
 
 function updateAiMemoryWithReviewedPost(memory = {}, post = {}) {
   if (post?.learningDisabled) return normalizeAiMemory(memory);
   const existingEvents = Array.isArray(memory.learningEvents) ? memory.learningEvents.slice() : [];
-  const event = buildLearningEvent(post, post.relativePerformance);
+  const event = post.performanceObservation || null;
   const eventExists = event && existingEvents.some(item => item.id === event.id || (
-    item.sourcePostId === event.sourcePostId && item.reviewedAt === event.reviewedAt
+    item.sourceId === event.sourceId && item.observedAt === event.observedAt
   ));
   const learningEvents = event && !eventExists
     ? [event, ...existingEvents].slice(0, 100)
@@ -328,7 +202,38 @@ function applyPerformanceReview(post = {}, metrics = {}, vault = []) {
   };
   if (!normalizedMetrics.views) return null;
   const baseline = getBaseline(vault, post.id);
-  const relativePerformance = classifyRelativePerformance(normalizedMetrics, baseline);
+  const contentFeatures = inferContentFeatures(post);
+  const comparableHistory = (Array.isArray(vault) ? vault : [])
+    .filter(item => item?.id !== post.id)
+    .filter(item => !item?.learningDisabled)
+    .filter(item => getPerformanceMetrics(item).views > 0)
+    .map((item) => {
+      if (item.performanceObservation) return item.performanceObservation;
+      const itemFeatures = item.contentFeatures || inferContentFeatures(item);
+      return {
+        id: `history-${item.id || item.savedAt}`,
+        sourceId: item.id || '',
+        objective: item.objective || '',
+        contentMode: item.contentMode || '',
+        engineLanguage: item.engineLanguage || item.language || itemFeatures.language || 'unknown',
+        featureKey: getFeatureKey({ contentFeatures: itemFeatures }),
+        contentFeatures: itemFeatures,
+        metrics: getPerformanceMetrics(item),
+        observedAt: Number(item.reviewedAt || item.publishedAt || item.savedAt) || 0
+      };
+    });
+  const observationInput = normalizePostRecord({
+    ...post,
+    contentFeatures,
+    featureKey: getFeatureKey({ contentFeatures }),
+    engineLanguage: post.engineLanguage || post.language || contentFeatures.language || 'unknown'
+  });
+  const performanceObservation = buildPerformanceObservation(
+    observationInput,
+    normalizedMetrics,
+    comparableHistory
+  );
+  const relativePerformance = performanceObservation.relativePerformance;
 
   const updatedPost = normalizePostRecord({
     ...post,
@@ -336,9 +241,11 @@ function applyPerformanceReview(post = {}, metrics = {}, vault = []) {
     performanceMetrics: normalizedMetrics,
     performanceBaseline: baseline,
     relativePerformance: relativePerformance,
-    contentFeatures: inferContentFeatures(post),
+    contentFeatures,
+    engineLanguage: observationInput.engineLanguage,
+    performanceObservation,
     status: POST_STATUS.REVIEWED,
-    aiLearning: buildLearning(post, relativePerformance),
+    aiLearning: buildLearning({ ...post, contentFeatures }, relativePerformance),
     reviewedAt: Date.now(),
     autoReviewedAt: metrics.autoReviewedAt || post.autoReviewedAt || Date.now()
   });

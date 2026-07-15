@@ -13,6 +13,8 @@ const reviewedVault = [1, 2, 3].map((id) => normalizePostRecord({
   text: `Past post ${id}`,
   origin: POST_ORIGIN.AUTO_GENERATED,
   contentMode: POST_CONTENT_MODE.POST,
+  objective: 'auto_post',
+  engineLanguage: 'en',
   actualViews: 800,
   performanceMetrics: { views: 800 },
   relativePerformance: 'below_baseline',
@@ -24,6 +26,8 @@ const nextPost = normalizePostRecord({
   text: 'Coding is not a skill. It is leverage.',
   origin: POST_ORIGIN.AUTO_GENERATED,
   contentMode: POST_CONTENT_MODE.POST,
+  objective: 'auto_post',
+  engineLanguage: 'en',
   status: POST_STATUS.PUBLISHED,
   publishedAt: 1700001000000
 });
@@ -34,11 +38,15 @@ const review = applyPerformanceReview(nextPost, metrics, reviewedVault);
 assert.equal(review.post.status, POST_STATUS.REVIEWED);
 assert.equal(review.post.performanceMetrics.views, 900);
 assert.equal(review.post.performanceMetrics.likes, 12);
-assert.ok(review.post.aiLearning.includes('Reason:'));
-assert.ok(review.post.aiLearning.includes('Next:'));
+assert.equal(review.post.relativePerformance, 'insufficient_data');
+assert.match(review.post.aiLearning, /comparable samples/i);
+assert.equal(review.post.performanceObservation.cohortSize, 3);
 
 const memory = updateAiMemoryWithReviewedPost({}, review.post);
 assert.ok(Array.isArray(memory.learnedRules));
+assert.equal(memory.learnedRules.length, 0);
+assert.equal(memory.learningEvents.length, 1);
+assert.equal(memory.learningEvents[0].objective, 'auto_post');
 
 const baseline = buildAccountPerformanceBaseline([...reviewedVault, review.post]);
 assert.equal(baseline.sampleCount, 4);

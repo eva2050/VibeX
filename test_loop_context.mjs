@@ -49,8 +49,13 @@ const context = buildGenerationContext({
     learnedRules: [{
       text: 'playbook posts with specific hooks outperformed',
       contentMode: POST_CONTENT_MODE.POST,
+      objective: 'auto_post',
+      engineLanguage: 'en',
       sampleCount: 3,
-      confidence: 82
+      confidence: 82,
+      ruleState: 'active',
+      active: true,
+      expiresAt: Date.now() + 86400000
     }]
   },
   styleTrainingData: ['Short first line.\n\nConcrete second line.'],
@@ -81,7 +86,7 @@ const context = buildGenerationContext({
       performanceMetrics: { views: 15000, likes: 500, replies: 12, reposts: 22 }
     }]
   }
-}, { promptType: 'auto_post' });
+}, { promptType: 'auto_post', objective: 'auto_post', lang: 'en' });
 
 assert.match(context.agentMemoryPrompt, /内容支柱/);
 assert.match(context.performanceMemoryPrompt, /playbook posts/);
@@ -96,12 +101,48 @@ assert.match(context.editFeedbackPrompt, /人工校对记忆/);
 const rewriteContext = buildGenerationContext({
   aiMemory: {
     learnedRules: [
-      { text: 'post-only rule', contentMode: POST_CONTENT_MODE.POST },
-      { text: 'rewrite-only rule', contentMode: POST_CONTENT_MODE.REWRITE }
+      {
+        text: 'post-only rule',
+        contentMode: POST_CONTENT_MODE.POST,
+        objective: 'auto_post',
+        engineLanguage: 'en',
+        ruleState: 'active',
+        active: true,
+        expiresAt: Date.now() + 86400000
+      },
+      {
+        text: 'rewrite-only rule',
+        contentMode: POST_CONTENT_MODE.REWRITE,
+        objective: 'studio_rewrite',
+        engineLanguage: 'en',
+        ruleState: 'active',
+        active: true,
+        expiresAt: Date.now() + 86400000
+      },
+      {
+        text: 'candidate rewrite rule',
+        contentMode: POST_CONTENT_MODE.REWRITE,
+        objective: 'studio_rewrite',
+        engineLanguage: 'en',
+        ruleState: 'candidate',
+        active: false,
+        expiresAt: Date.now() + 86400000
+      },
+      {
+        text: 'japanese rewrite rule',
+        contentMode: POST_CONTENT_MODE.REWRITE,
+        objective: 'studio_rewrite',
+        engineLanguage: 'ja',
+        ruleState: 'active',
+        active: true,
+        expiresAt: Date.now() + 86400000
+      }
     ]
   }
-}, { promptType: 'viral_rewrite' });
+}, { promptType: 'viral_rewrite', objective: 'studio_rewrite', lang: 'en' });
 assert.doesNotMatch(rewriteContext.performanceMemoryPrompt, /post-only rule/);
 assert.match(rewriteContext.performanceMemoryPrompt, /rewrite-only rule/);
+assert.doesNotMatch(rewriteContext.performanceMemoryPrompt, /candidate rewrite rule/);
+assert.doesNotMatch(rewriteContext.performanceMemoryPrompt, /japanese rewrite rule/);
 
 console.log('loop/context checks passed');
