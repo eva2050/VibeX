@@ -48,12 +48,13 @@ function formatAgentMemoryForPrompt(memory = {}) {
 
 function getContentModeForPrompt(promptType = '') {
   if (promptType === 'auto_post') return POST_CONTENT_MODE.POST;
-  if (promptType === 'draft_reply') return POST_CONTENT_MODE.REPLY;
+  if (['draft_reply', 'auto_reply'].includes(promptType)) return POST_CONTENT_MODE.REPLY;
   return POST_CONTENT_MODE.REWRITE;
 }
 
 function getObjectiveForPrompt(promptType = '') {
   if (promptType === 'auto_post') return LEARNING_OBJECTIVE.AUTO_POST;
+  if (promptType === 'auto_reply') return LEARNING_OBJECTIVE.AUTO_RELATIONSHIP;
   if (promptType === 'draft_reply') return LEARNING_OBJECTIVE.STUDIO_REPLY;
   return LEARNING_OBJECTIVE.STUDIO_REWRITE;
 }
@@ -168,7 +169,7 @@ function formatStyleTrainingForPrompt(styleTrainingData) {
 }
 
 function formatPreferenceMemoryForPrompt(config = {}, promptType = '') {
-  if (!['viral_rewrite', 'draft_reply', 'auto_post'].includes(promptType)) return '';
+  if (!['viral_rewrite', 'draft_reply', 'auto_reply', 'auto_post'].includes(promptType)) return '';
   let text = '';
   if (Array.isArray(config.feedbackLikes) && config.feedbackLikes.length > 0) {
     const likes = config.feedbackLikes
@@ -189,7 +190,7 @@ function formatPreferenceMemoryForPrompt(config = {}, promptType = '') {
 
 function formatEditFeedbackForPrompt(feedbackLoopData, promptType = '') {
   if (!Array.isArray(feedbackLoopData) || feedbackLoopData.length === 0) return '';
-  if (!['viral_rewrite', 'draft_reply', 'auto_post'].includes(promptType)) return '';
+  if (!['viral_rewrite', 'draft_reply', 'auto_reply', 'auto_post'].includes(promptType)) return '';
   const feedbackExamples = feedbackLoopData
     .slice(-3)
     .map((fb, idx) => [
@@ -233,7 +234,9 @@ function buildGenerationContext(config = {}, options = {}) {
       lang,
       now: options.now
     }),
-    topPerformancePrompt: formatTopPostsForPrompt(config.accountPerformanceBaseline),
+    topPerformancePrompt: objective === LEARNING_OBJECTIVE.AUTO_RELATIONSHIP
+      ? ''
+      : formatTopPostsForPrompt(config.accountPerformanceBaseline),
     playbookPrompt: formatPlaybookForPrompt(playbook),
     stylePrompt: formatStyleTrainingForPrompt(config.styleTrainingData),
     editFeedbackPrompt: formatEditFeedbackForPrompt(config.feedbackLoopData, promptType),

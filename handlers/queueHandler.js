@@ -1,6 +1,11 @@
 import { formatTweetForX } from '../utils/textUtils.js';
 import { addLog } from '../core/state.js';
 import { REPLY_RETRY_LOCK_MS } from '../core/constants.js';
+import {
+  aggregateRelationshipAuthors,
+  buildRelationshipInteraction,
+  buildRelationshipVaultRecord
+} from '../core/relationshipLoop.js';
 import '../core/automationState.js';
 
 const { EVENTS: REPLY_FLOW_EVENTS, buildReplyFlowTransition, hasActiveReplyFlow, REPLY_FLOW_STORAGE_KEYS } = globalThis.VibeXAutomationState;
@@ -66,7 +71,11 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
     const author = request.tweetAuthor || '未知用户';
     const replyText = request.replyText || '';
     
-    chrome.storage.local.get(['stats', 'sessionReplyCount', 'repliesToday', 'lastReplyDate', 'onboardingStrategy', 'recentRepliedAuthors'], (res) => {
+    chrome.storage.local.get([
+      'stats', 'sessionReplyCount', 'repliesToday', 'lastReplyDate',
+      'onboardingStrategy', 'recentRepliedAuthors', 'relationshipInteractions',
+      'draftVault'
+    ], (res) => {
       const stats = res.stats || { tweetsProcessed: 0, repliesSent: 0 };
       stats.repliesSent = (stats.repliesSent || 0) + 1;
       
@@ -103,6 +112,27 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
       const twitterCooldownUntil = Date.now() + nextCooldownMs;
       
       const replyFlowDone = buildReplyFlowTransition(res, REPLY_FLOW_EVENTS.REPLY_COMPLETED).update;
+      const interaction = buildRelationshipInteraction({
+        targetAuthor: author,
+        sourceStatusId: request.tweetStatusId,
+        sourceUrl: request.tweetStatusHref,
+        sourceText: request.tweetContent,
+        replyText,
+        engineLanguage: request.engineLanguage,
+        completedAt: request.completedAt || Date.now()
+      });
+      const relationshipInteractions = [
+        interaction,
+        ...(Array.isArray(res.relationshipInteractions) ? res.relationshipInteractions : [])
+          .filter(item => item?.id !== interaction.id)
+      ].slice(0, 300);
+      const relationshipAuthors = aggregateRelationshipAuthors(relationshipInteractions);
+      const relationshipRecord = buildRelationshipVaultRecord(interaction);
+      const draftVault = [
+        relationshipRecord,
+        ...(Array.isArray(res.draftVault) ? res.draftVault : [])
+          .filter(item => item?.interactionId !== interaction.id && item?.id !== interaction.id)
+      ].slice(0, 100);
 
       chrome.storage.local.set({
         stats,
@@ -111,11 +141,18 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
         lastReplyDate: nowString,
         twitterCooldownUntil,
         recentRepliedAuthors: recentAuthors,
+        relationshipInteractions,
+        relationshipAuthors,
+        draftVault,
         ...replyFlowDone,
         lastReplySent: {
           tweetAuthor: author,
+          tweetStatusId: interaction.sourceStatusId,
+          tweetStatusHref: interaction.sourceUrl,
           replyText,
-          time: Date.now()
+          engineLanguage: interaction.engineLanguage,
+          interactionId: interaction.id,
+          time: interaction.completedAt
         }
       }, () => {
         const cdMins = Math.round(nextCooldownMs / 60000);

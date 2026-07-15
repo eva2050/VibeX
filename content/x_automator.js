@@ -79,14 +79,18 @@ function notifyReplyFailed(reason) {
   safeRuntimeMessage({ action: 'replyFailed', reason });
 }
 
-function notifyReplyCompleted(tweetAuthor, tweetContent, replyText) {
+function notifyReplyCompleted(tweetAuthor, tweetContent, replyText, meta = {}) {
   applyReplyFlowEvent(ReplyFlowEvents.REPLY_COMPLETED);
   notifyReplyFlowStateVisible();
   safeRuntimeMessage({
     action: 'replyCompleted',
     tweetAuthor,
     tweetContent,
-    replyText
+    replyText,
+    tweetStatusId: meta.tweetStatusId || '',
+    tweetStatusHref: meta.tweetStatusHref || '',
+    engineLanguage: meta.engineLanguage || 'unknown',
+    completedAt: Date.now()
   });
 }
 
@@ -687,7 +691,15 @@ function isLoggedOutOrBlocked() {
   return /Sign in to X|Log in to X|登录 X|登录到 X|验证码|Verify your identity|Confirm your identity|验证你的身份|需要验证|captcha/i.test(textToCheck);
 }
 
-async function startIntentReplyFlow({ statusId, replyText, tweetAuthor, tweetContent, reason }) {
+async function startIntentReplyFlow({
+  statusId,
+  statusHref,
+  replyText,
+  tweetAuthor,
+  tweetContent,
+  engineLanguage,
+  reason
+}) {
   if (!statusId) return false;
   addLog('info', `${reason || '开始 X 官方 intent 回复'}，打开官方回复页`);
   const targetUrl = getIntentReplyUrl(statusId, replyText);
@@ -698,6 +710,8 @@ async function startIntentReplyFlow({ statusId, replyText, tweetAuthor, tweetCon
         replyText,
         tweetAuthor,
         tweetContent,
+        tweetStatusHref: statusHref || '',
+        engineLanguage: engineLanguage || 'unknown',
         createdAt: Date.now()
       }
     }, {
@@ -735,7 +749,15 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
     return;
   }
   if (!chrome.runtime?.id) return;
-  const { tweetElementId, replyText, tweetAuthor, tweetContent, tweetStatusHref, tweetStatusId } = e.detail;
+  const {
+    tweetElementId,
+    replyText,
+    tweetAuthor,
+    tweetContent,
+    tweetStatusHref,
+    tweetStatusId,
+    engineLanguage
+  } = e.detail;
   const author = tweetAuthor || '未知用户';
   const originalText = tweetContent || '';
   let statusId = tweetStatusId || getStatusIdFromHref(tweetStatusHref);
@@ -797,7 +819,11 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
             const outcome = await waitForIntentSendOutcome(normalizeText(replyText), 12000);
             if (['success', 'duplicate'].includes(outcome.status)) {
               addLog('success', `成功发送回复给 @${author}`);
-              notifyReplyCompleted(author, originalText, replyText);
+              notifyReplyCompleted(author, originalText, replyText, {
+                tweetStatusId: statusId,
+                tweetStatusHref,
+                engineLanguage
+              });
               isAutomatorBusy = false;
               
               // Close modal if still open
@@ -819,9 +845,11 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
     addLog('warn', '原生回复失败，回退到 Intent 页面模式');
     const intentStarted = await startIntentReplyFlow({
       statusId,
+      statusHref: tweetStatusHref,
       replyText,
       tweetAuthor: author,
       tweetContent: originalText,
+      engineLanguage,
       reason: `准备通过 X 官方 intent 回复 @${author}`
     });
     if (!intentStarted) {
@@ -1483,7 +1511,11 @@ async function handlePendingReply() {
       addLog('success', outcome.status === 'duplicate'
         ? `X 提示已回复过 @${pending.tweetAuthor || '未知用户'}，已按完成处理：${outcome.reason}`
         : `已通过 X 官方 intent 回复 @${pending.tweetAuthor || '未知用户'}：${outcome.reason}`);
-      notifyReplyCompleted(pending.tweetAuthor || '未知用户', pending.tweetContent || '', replyTextForSend);
+      notifyReplyCompleted(pending.tweetAuthor || '未知用户', pending.tweetContent || '', replyTextForSend, {
+        tweetStatusId: pending.statusId,
+        tweetStatusHref: pending.tweetStatusHref,
+        engineLanguage: pending.engineLanguage
+      });
     } catch (error) {
       consecutiveFailures++;
       const reason = `X intent 自动回复异常: ${error.message} (连续失败 ${consecutiveFailures} 次)`;

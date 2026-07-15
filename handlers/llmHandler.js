@@ -165,7 +165,17 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
     context.generateAIResponse(request.tweetContent || request.tweetText || '', request)
       .then(replyText => {
         addLog('success', 'reply_generation_complete');
-        sendResponse({ success: true, replyText, reply: replyText });
+        chrome.storage.local.get(['engineLanguage', 'accountLanguage'], (items) => {
+          const configuredLanguage = items.engineLanguage === 'auto'
+            ? items.accountLanguage
+            : items.engineLanguage;
+          sendResponse({
+            success: true,
+            replyText,
+            reply: replyText,
+            engineLanguage: request.originalLanguage || configuredLanguage || 'unknown'
+          });
+        });
       })
       .catch(error => {
         addLog('error', 'ai_api_failed', [error.message]);

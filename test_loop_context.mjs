@@ -145,6 +145,39 @@ assert.match(rewriteContext.performanceMemoryPrompt, /rewrite-only rule/);
 assert.doesNotMatch(rewriteContext.performanceMemoryPrompt, /candidate rewrite rule/);
 assert.doesNotMatch(rewriteContext.performanceMemoryPrompt, /japanese rewrite rule/);
 
+const relationshipContext = buildGenerationContext({
+  aiMemory: {
+    learnedRules: [
+      {
+        text: 'auto-post views rule',
+        contentMode: POST_CONTENT_MODE.POST,
+        objective: 'auto_post',
+        engineLanguage: 'en',
+        ruleState: 'active',
+        active: true,
+        expiresAt: Date.now() + 86400000
+      },
+      {
+        text: 'relationship-specific reply rule',
+        contentMode: POST_CONTENT_MODE.REPLY,
+        objective: 'auto_relationship',
+        engineLanguage: 'en',
+        ruleState: 'active',
+        active: true,
+        expiresAt: Date.now() + 86400000
+      }
+    ]
+  },
+  accountPerformanceBaseline: {
+    topByViews: [{ id: 'winner', text: 'viral post sample', actualViews: 99999 }]
+  }
+}, { promptType: 'auto_reply', lang: 'en' });
+assert.equal(relationshipContext.objective, 'auto_relationship');
+assert.equal(relationshipContext.contentMode, POST_CONTENT_MODE.REPLY);
+assert.match(relationshipContext.performanceMemoryPrompt, /relationship-specific reply rule/);
+assert.doesNotMatch(relationshipContext.performanceMemoryPrompt, /auto-post views rule/);
+assert.equal(relationshipContext.topPerformancePrompt, '');
+
 const boundedContext = buildGenerationContext({
   engineLanguage: 'en',
   styleTrainingData: ['style-one', 'style-two', 'style-three', 'style-four'],

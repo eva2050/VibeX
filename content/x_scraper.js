@@ -1361,6 +1361,7 @@ function scrapeTweets() {
             tweetContent: selected.text,
             tweetStatusHref: selected.tweetStatus.href,
             tweetStatusId: selected.tweetStatus.id,
+            engineLanguage: response.engineLanguage || detectedOrigLang || 'unknown',
             automationMode
           }
         }));

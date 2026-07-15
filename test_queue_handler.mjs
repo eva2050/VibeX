@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 
 globalThis.VibeXAutomationState = {
   EVENTS: {
-    REPLY_FAILED: 'REPLY_FAILED'
+    REPLY_FAILED: 'REPLY_FAILED',
+    REPLY_COMPLETED: 'REPLY_COMPLETED'
   },
   buildReplyFlowTransition: (state, event, payload = {}) => ({
     update: {
@@ -97,6 +98,26 @@ async function callQueueMessage(request, context = {}) {
   assert.equal(storageState.isAutoPaused, true);
   assert.equal(storageState.pauseReason, 'compose stuck');
   assert.equal(storageState.isPosting, false);
+}
+
+{
+  const response = await callQueueMessage({
+    action: 'replyCompleted',
+    tweetAuthor: '@Builder',
+    tweetContent: '原帖内容',
+    tweetStatusId: '123',
+    tweetStatusHref: 'https://x.com/builder/status/123',
+    replyText: '具体回复',
+    engineLanguage: 'ja'
+  });
+  assert.deepEqual(response, { success: true });
+  assert.equal(storageState.relationshipInteractions.length, 1);
+  assert.equal(storageState.relationshipInteractions[0].sourceStatusId, '123');
+  assert.equal(storageState.relationshipInteractions[0].engineLanguage, 'ja');
+  assert.equal(storageState.relationshipInteractions[0].metrics.views, undefined);
+  assert.equal(storageState.relationshipAuthors[0].outboundReplies, 1);
+  assert.equal(storageState.draftVault[0].objective, 'auto_relationship');
+  assert.equal(storageState.draftVault[0].contentMode, 'reply');
 }
 
 {

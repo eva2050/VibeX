@@ -2134,7 +2134,7 @@ async function generateAIResponse(tweetContent, replyContext = {}) {
       throw new Error(errors.join('；'));
     }
     
-    const generationContext = buildGenerationContext(config, { promptType: 'draft_reply' });
+    const generationContext = buildGenerationContext(config, { promptType: 'auto_reply' });
       
       const styleConstraint = generationContext.stylePrompt;
       const feedbackConstraint = generationContext.editFeedbackPrompt;
@@ -2167,14 +2167,8 @@ ${generationContext.accountBio}
 长期记忆：
 ${generationContext.agentMemoryPrompt}
 
-增长模板：
-${generationContext.playbookPrompt || '暂无'}
-
-发布表现记忆：
+关系互动记忆：
 ${generationContext.performanceMemoryPrompt}
-
-高表现样本：
-${generationContext.topPerformancePrompt || '暂无高表现样本。'}
 
 ${styleConstraint}
 ${feedbackConstraint}
