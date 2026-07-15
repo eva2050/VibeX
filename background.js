@@ -15,6 +15,7 @@ import { buildInitialAutoPersona, localizeAutoPersona, resolveAutoPersonaLanguag
 import { inferDominantAccountLanguage, normalizeDetectedAccountLanguage } from './core/accountLanguage.js';
 import { buildReplyStrategyInstruction } from './core/replyStrategies.js';
 import { formatStyleSampleLearningForPrompt, getStyleSamples } from './core/styleLearning.js';
+import { attributeSyncedPostToVault } from './core/generationAttribution.js';
 import { REPLY_RETRY_LOCK_MS, DEFAULT_AGENT_MEMORY, AGENT_MEMORY_LABELS, GROWTH_PLAYBOOKS, DEFAULT_INTERACTION_TARGETS, PROJECT_ACCOUNT_HANDLES, DEFAULT_DISCOVERY_KEYWORDS, selectGrowthPlaybook } from './core/constants.js';
 import { setupMessageRouter } from "./handlers/messageRouter.js";
 import './core/automationState.js';
@@ -912,6 +913,7 @@ function buildSyncedXPostRecord(post = {}, user = {}, existing = null) {
     contentMode: post.contentMode || existing?.contentMode || POST_CONTENT_MODE.POST,
     author: user.username ? `@${user.username}` : existing?.author || 'X',
     authorName: user.name || existing?.authorName || user.username || 'X',
+    accountId: String(user.id || user.username || existing?.accountId || ''),
     postSource: post.postSource || existing?.postSource || 'profile_scan',
     status: alreadyReviewed || views > 0 ? POST_STATUS.REVIEWED : POST_STATUS.PUBLISHED,
     postUrl: post.postUrl || existing?.postUrl || (hasRealStatusId && user.username ? `https://x.com/${user.username}/status/${rawStatusId}` : ''),
@@ -948,6 +950,9 @@ function mergeSyncedXPostsIntoVault(vault = [], posts = [], user = {}, options =
   let updated = 0;
   let reviewedAdded = 0;
   const reviewedPostsForLearning = [];
+  let nextGenerationSessions = Array.isArray(options.generationSessions)
+    ? options.generationSessions.slice(0, 100)
+    : [];
 
   posts.forEach((post) => {
     const rawStatusId = String(post?.statusId || '').trim();
@@ -972,6 +977,27 @@ function mergeSyncedXPostsIntoVault(vault = [], posts = [], user = {}, options =
         lastSyncedFrom: options.postSource
       });
     }
+    let targetIndex = existingIndex;
+    if (targetIndex < 0 && nextGenerationSessions.length > 0) {
+      const attributed = attributeSyncedPostToVault({
+        post: {
+          ...record,
+          accountId: String(user.id || user.username || record.accountId || '')
+        },
+        sessions: nextGenerationSessions,
+        vault: nextVault,
+        now: Date.now()
+      });
+      if (attributed) {
+        nextGenerationSessions = attributed.sessions;
+        targetIndex = nextVault.findIndex(item => item.generationId === attributed.match.session.id);
+        record = normalizePostRecord({
+          ...attributed.post,
+          syncedFromX: true,
+          lastSyncedAt: Date.now()
+        });
+      }
+    }
     const metrics = record.performanceMetrics || {};
     const isMature = Date.now() - Number(record.publishedAt || record.createdAt || 0) >= POST_REVIEW_DELAY_MS;
     const hasViews = isMature && Number(record.actualViews || metrics.views || 0) > 0;
@@ -987,8 +1013,8 @@ function mergeSyncedXPostsIntoVault(vault = [], posts = [], user = {}, options =
       }
     }
 
-    if (existingIndex >= 0) {
-      nextVault[existingIndex] = record;
+    if (targetIndex >= 0) {
+      nextVault[targetIndex] = record;
       updated += 1;
     } else {
       nextVault.unshift(record);
@@ -1001,8 +1027,8 @@ function mergeSyncedXPostsIntoVault(vault = [], posts = [], user = {}, options =
         ...record,
         xLearningRecordedAt: learnedAt
       });
-      if (existingIndex >= 0) {
-        nextVault[existingIndex] = record;
+      if (targetIndex >= 0) {
+        nextVault[targetIndex] = record;
       } else {
         nextVault[0] = record;
       }
@@ -1017,7 +1043,8 @@ function mergeSyncedXPostsIntoVault(vault = [], posts = [], user = {}, options =
     added,
     updated,
     reviewedAdded,
-    reviewedPostsForLearning
+    reviewedPostsForLearning,
+    generationSessions: nextGenerationSessions
   };
 }
 
@@ -1115,7 +1142,7 @@ function buildPerformanceBaselinePayload(posts = [], extra = {}) {
 }
 
 async function saveScannedXPostsToVault(posts = [], scanMeta = {}) {
-  const items = await getStorage(['draftVault', 'aiMemory', 'accountPerformanceBaseline', 'xAuth', 'engineLanguage', 'onboardingStrategy', 'aiPersona', 'xDataSyncStatus', 'hiddenXPostKeys']);
+  const items = await getStorage(['draftVault', 'aiMemory', 'accountPerformanceBaseline', 'xAuth', 'engineLanguage', 'onboardingStrategy', 'aiPersona', 'xDataSyncStatus', 'hiddenXPostKeys', 'generationSessions']);
   const auth = normalizeXAuth(items.xAuth || {});
   const user = auth.user || {};
   const handle = scanMeta.handle || user.username || '';
@@ -1125,7 +1152,8 @@ async function saveScannedXPostsToVault(posts = [], scanMeta = {}) {
     username: handle || user.username || ''
   }, {
     postSource: scanMeta.source || 'profile_scan',
-    hiddenXPostKeys: items.hiddenXPostKeys || []
+    hiddenXPostKeys: items.hiddenXPostKeys || [],
+    generationSessions: items.generationSessions || []
   });
   let aiMemory = items.aiMemory || {};
   merged.reviewedPostsForLearning.forEach((post) => {
@@ -1163,6 +1191,7 @@ async function saveScannedXPostsToVault(posts = [], scanMeta = {}) {
 
   const updates = {
     draftVault: merged.vault,
+    generationSessions: merged.generationSessions,
     aiMemory,
     ...getXSyncStatusPatch(scanMeta.status || 'page_scan', {
       source: scanMeta.source || 'profile_scan',
