@@ -1,42 +1,40 @@
-# Chinese X Post Skill Design
+# 中文 X Post Skill 设计说明
 
-## Objective
+## 目标
 
-Build a versioned, immutable Chinese X Post Skill for AI, technology, product, indie-building, and creator-business content. The Skill must outperform the current generic Chinese rewrite rules in repeatable blind evaluation before it becomes the default for Studio Post or Auto Post.
+为 AI、科技、产品、独立开发和创作者商业化内容建立一个版本化、运行时不可变的中文 X Post Skill。它必须在可重复的真实盲测中优于当前通用中文生成规则，才能成为 Studio Post 或 Auto Post 的默认能力。
 
-The Skill is the shared professional baseline. User profile, curated samples, explicit edits, likes/dislikes, and evidence-gated Loop rules remain separate overlays and cannot mutate the Skill package.
+Skill 是共享的专业质量基线。用户画像、精选样本、人工修改、喜欢/不喜欢和通过证据门控的 Loop 规则都是独立覆盖层，不能直接改写 Skill 本体。
 
-## Scope
+## 范围
 
-This delivery covers the Chinese Post Skill only:
+本阶段只覆盖中文 Post：
 
-- Studio `viral_rewrite` Post generation;
-- Auto original-post generation;
-- deterministic and model-judged benchmark tooling;
-- version and generation-session attribution.
+- Studio `viral_rewrite`；
+- Auto 原创 Post；
+- 确定性评估与模型盲测工具；
+- Skill 版本和生成记录归因。
 
-The following are explicitly deferred until the Post Skill meets its quality gate:
+以下能力等 Post Skill 通过质量门槛后再做：
 
-- X Article research and focused editor;
-- Chinese X interaction Reply Skill;
-- English, Japanese, Spanish, and Indonesian content skills.
+- X Article 检索与专注编辑器；
+- 中文 X 互动 Reply Skill；
+- 英文、日文、西班牙文和印尼文内容 Skill。
 
-## Content Territory
+## 内容边界
 
-Version 1 targets six content families:
+v1 支持 6 类内容：
 
-1. AI or technology product observation;
-2. tool-use experience and product criticism;
-3. build-in-public progress;
-4. failure story and retrospective;
-5. industry opinion and trend judgment;
-6. method, workflow, or practical framework.
+1. AI 或科技产品观察；
+2. 工具使用体验和产品批评；
+3. Build in Public 进展；
+4. 失败经历和复盘；
+5. 行业观点和趋势判断；
+6. 方法、工作流和实操框架。
 
-The Skill is not a universal Chinese social-copy generator. Inputs outside this territory use the existing language-safe fallback and are marked `fallback_generic` in generation metadata.
+它不是通用中文社交文案生成器。边界外输入继续走安全的通用链路，并在生成元数据中标记为 `fallback_generic`。
 
-## Architecture
-
-The product-internal Skill package has a stable interface and language/format registry:
+## 架构
 
 ```text
 core/contentSkills/
@@ -48,9 +46,9 @@ core/contentSkills/
     └── postBenchmark.js
 ```
 
-`registry.js` resolves a Skill by `{ language, format, objective }`. Version 1 registers `zh/post` for `studio_rewrite` and `auto_post`.
+`registry.js` 按 `{ language, format, objective }` 查找 Skill。v1 为 `studio_rewrite` 和 `auto_post` 注册 `zh/post`。
 
-The Skill exposes:
+Skill 对外接口：
 
 ```js
 {
@@ -66,141 +64,140 @@ The Skill exposes:
 }
 ```
 
-Input diagnosis is deterministic and does not consume an additional model call. The existing maximum remains three candidate calls, one independent judge call, and at most one repair call.
+输入诊断完全确定性执行，不增加模型调用。Studio 仍最多使用 3 次候选生成、1 次独立评审和 1 次修复。
 
-## Content Diagnosis
+## 输入诊断
 
-The diagnosis records:
+诊断结果记录：
 
-- content family;
-- source claim and key entities;
-- factual certainty markers;
-- first-person experience availability;
-- concrete signals already present;
-- recommended and forbidden structures;
-- target length band;
-- fallback reason when outside the Skill territory.
+- 内容类型；
+- 原始主张和关键实体；
+- 事实确定性；
+- 是否存在第一人称经历；
+- 原文已有的具体信号；
+- 推荐和禁止结构；
+- 目标长度区间；
+- 超出 Skill 边界时的回退原因。
 
-Diagnosis must reject structural misuse:
+必须阻止以下结构误用：
 
-- no competition or allocation relationship means no betting/game framing;
-- no supplied first-person experience means no invented personal story;
-- a question, suspicion, or uncertain claim cannot become a factual assertion;
-- a short observation cannot become a long tutorial;
-- account samples cannot replace the source topic or claim.
+- 没有竞争或资源分配关系时，不得强套押注、牌局或输赢；
+- 原文没有第一人称经历时，不得虚构个人故事；
+- 疑问、怀疑或可能性不能改成确定事实；
+- 短观察不能扩写成长教程；
+- 账号样本不能替换当前素材的主题和主张。
 
-## Candidate Diversity
+## 候选差异
 
-The three candidates have separate jobs:
+3 个候选各自承担不同任务：
 
-1. `faithful_sharpening`: preserve the source argument while improving hook, compression, and rhythm;
-2. `cognitive_reframe`: surface an existing contrast, constraint, or overlooked variable without adding a new claim;
-3. `concrete_scene`: express the existing idea through supplied actions, costs, workflow, or observable product behavior without inventing an event.
+1. `faithful_sharpening`：保持原意，只优化首句、压缩和节奏；
+2. `cognitive_reframe`：强调原文已有的反差、约束或被忽略变量，不新增结论；
+3. `concrete_scene`：使用原文已有的动作、成本、工作流或产品行为承托观点，不虚构事件。
 
-When a strategy is not supported by the diagnosis, the Skill substitutes another eligible strategy rather than forcing it. Candidate similarity is measured after normalization; near-duplicate strategies are a quality failure.
+当输入不支持某个策略时，Skill 必须替换成其他合格策略，而不是强套结构。归一化后高度相似的候选视为质量失败。
 
-## Chinese Quality Standard
+## 中文质量标准
 
-The independent judge uses a Chinese X-specific rubric:
+独立评审采用中文 X 专用评分：
 
-- claim and certainty fidelity: 25;
-- concrete information density: 20;
-- natural Chinese X voice: 20;
-- first-line continuation value: 15;
-- save/share/discussion value: 10;
-- audience and account fit: 10.
+- 主张与确定性忠实度：25；
+- 具体信息密度：20；
+- 自然中文 X 表达：20；
+- 首句继续阅读价值：15；
+- 收藏、转发和讨论价值：10；
+- 读者与账号匹配：10。
 
-Hard failures cannot be offset by a high numeric score:
+以下硬失败不能被高分抵消：
 
-- unsupported external fact;
-- invented personal experience;
-- topic drift or changed conclusion;
-- wrong output language;
-- certainty escalation;
-- forced structure unsupported by the source;
-- obvious marketing-account, translation, or template-heavy voice.
+- 新增外部事实；
+- 虚构个人经历；
+- 跑题或改变结论；
+- 输出语言错误；
+- 确定性升级；
+- 强套原文不支持的结构；
+- 明显营销号腔、翻译腔或模板腔。
 
-The existing Studio threshold remains 82 for the first benchmark so the comparison isolates Skill quality rather than changing both the prompt and the gate. Threshold recalibration requires benchmark evidence.
+首轮 benchmark 继续使用 Studio 的 82 分门槛，避免同时修改 Prompt 和门槛而无法归因。调整门槛必须有新的测试数据支持。
 
-## Base Skill and User Memory
+## Skill 与用户记忆的优先级
 
-Generation precedence is fixed:
+生成优先级固定为：
 
-1. safety, factual, language, and source-lock constraints;
-2. Chinese Post Skill diagnosis, strategies, and judge rubric;
-3. account positioning and boundaries;
-4. user-curated high-quality samples;
-5. explicit edit and preference feedback;
-6. active same-objective Chinese Loop rules.
+1. 安全、事实、语言和素材锁定；
+2. 中文 Post Skill 的诊断、策略和评审标准；
+3. 账号定位与边界；
+4. 用户精选的高质量样本；
+5. 明确的人工修改和偏好反馈；
+6. 同目标、同语言且已激活的 Loop 规则。
 
-The Skill package is versioned and read-only at runtime. User history can choose among quality-passing drafts and influence voice. It cannot lower hard constraints or rewrite the shared Skill.
+Skill 在运行时只读。用户历史可以影响合格候选中的选择和语气，但不能降低硬门槛，也不能修改共享 Skill。
 
-## Benchmark Dataset
+## Benchmark 数据集
 
-The repository includes a minimum of 60 Chinese fixtures, ten for each content family. Fixtures contain only synthetic or user-owned text and store no copied third-party post corpus.
+仓库包含至少 60 条中文合成或用户自有素材，6 类内容各 10 条，不复制第三方帖子语料。
 
-Each fixture defines:
+每条素材定义：
 
-- input text;
-- content family;
-- claims and entities that must remain;
-- certainty level;
-- permitted and forbidden structures;
-- whether first-person experience is available;
-- required concrete signals;
-- maximum expansion ratio;
-- anti-pattern expectations.
+- 输入文本和内容类型；
+- 必须保留的主张与实体；
+- 确定性；
+- 允许和禁止的结构；
+- 是否允许第一人称经历；
+- 必须保留的具体信号；
+- 最大扩写比例；
+- 预期拦截的反模式。
 
-Adversarial fixtures include short low-quality input, emotion without a claim, uncertain statements, unsupported numbers, extraction-error text, prompts likely to trigger excessive expansion, and prompts likely to trigger marketing formatting.
+对抗样本覆盖：低信息短输入、只有情绪没有主张、未确认判断、诱导新增数字、提取错误文本、过度扩写风险和营销号排版风险。
 
-## Evaluation and Release Gate
+## 评估与发布门槛
 
-Deterministic metrics:
+确定性指标包括：
 
-- core-claim preservation rate;
-- unsupported entity/number introduction rate;
-- certainty-escalation rate;
-- banned Chinese template hit rate;
-- output expansion violations;
-- pairwise candidate similarity and diversity;
-- correct content-family and forbidden-structure routing.
+- 核心主张保留率；
+- 新增实体或数字；
+- 确定性升级；
+- 中文模板命中；
+- 扩写比例违规；
+- 候选相似度和策略差异；
+- 内容类型与禁止结构路由准确率。
 
-Model-assisted blind comparison evaluates the current generator and Skill generator without revealing which is which. The evaluator returns fidelity, specificity, naturalness, hook, audience value, hard failures, and a winner.
+模型盲测在不暴露版本身份的情况下比较当前生成器与 Skill 生成器，输出忠实度、具体性、自然度、Hook、读者价值、硬失败和胜负。
 
-The Skill becomes the default only when all gates pass:
+Skill 只有全部满足以下门槛才能默认启用：
 
-- at least 95% core-claim preservation;
-- zero unsupported external facts in the golden set;
-- no more than 10% obvious template-hit rate;
-- no more than 20% candidate strategy duplication;
-- at least 65% blind-comparison win rate against the current generator;
-- no regression in non-Chinese generation tests.
+- 核心主张保留率至少 95%；
+- Golden Set 新增外部事实为 0；
+- 明显模板命中率不超过 10%；
+- 候选策略重复率不超过 20%；
+- 相比当前生成器的盲测胜率至少 65%；
+- 非中文生成测试无回归。
 
-If live provider credentials are unavailable in automated tests, deterministic gates still block integration and the blind benchmark reports `credentials_required` rather than fabricating a win rate. The Skill remains opt-in until the live comparison has been run.
+如果自动测试环境没有真实 Provider 凭据，报告必须显示 `credentials_required`，不能伪造胜率；在真实盲测完成前保持关闭。
 
-## Integration
+## 集成原则
 
-Studio Post resolves `zh/post` after engine-language normalization. The generation session stores `contentSkillId`, `contentSkillVersion`, diagnosis family, candidate strategy IDs, judge scores, and repair outcome.
+Studio Post 在语言标准化后查找 `zh/post`，生成记录保存 Skill ID、版本、内容类型、候选策略、评审分和修复结果。
 
-Auto Post uses the same Skill and quality gate but retains explicit Auto enablement and existing safe-publish behavior. Studio never publishes automatically.
+Auto Post 使用同一个 Skill 基线，但必须有独立 Auto 开关并继续遵守安全发布逻辑。Studio 永远不会自动发布。
 
-Non-Chinese generation and unsupported Chinese territory retain the current pipeline through an explicit fallback. Auto Reply continues using the independent `auto_relationship` objective and receives no Post Skill instructions.
+非中文内容和超出边界的中文内容继续走现有回退链路。Auto Reply 使用独立的 `auto_relationship` 目标，不能接收 Post Skill 指令。
 
-## Error Handling
+## 错误处理
 
-- Invalid diagnosis returns `fallback_generic` and does not fail the user request.
-- One candidate failure is tolerated when another candidate succeeds.
-- Invalid judge output fails the request and preserves the prior Studio result.
-- Repair runs at most once.
-- Benchmark output includes fixture IDs and aggregate counts but never API keys or complete provider payloads.
-- Skill/version metadata is immutable inside a generation session.
+- 无效诊断回退到 `fallback_generic`，不让用户请求失败；
+- 一个候选失败时，只要还有其他候选成功就继续；
+- 评审结果无效时请求失败并保留之前的 Studio 内容；
+- 最多修复一次；
+- benchmark 报告只保存素材 ID 和汇总，不保存 API Key 或完整 Provider 请求；
+- 生成记录中的 Skill ID 和版本不可变。
 
-## Delivery Order
+## 交付顺序
 
-1. Skill registry, diagnosis, strategy selection, and deterministic evaluator;
-2. 60-fixture benchmark and aggregate report;
-3. Studio Post integration behind `contentSkillRollout.zhPost`;
-4. Auto Post integration using the same resolver;
-5. live blind benchmark and release decision;
-6. X Article Skill as a separate specification;
-7. Chinese X interaction Reply Skill as a separate specification.
+1. Skill registry、诊断、策略和确定性评估；
+2. 60 条 benchmark 与汇总报告；
+3. Studio Post 集成；
+4. Auto Post 集成并保持独立开关；
+5. 批量真实盲测与发布决定；
+6. 单独设计 X Article Skill；
+7. 单独设计中文 X 互动 Reply Skill。

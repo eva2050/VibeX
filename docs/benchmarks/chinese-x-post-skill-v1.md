@@ -1,32 +1,32 @@
-# Chinese X Post Skill v1 Benchmark
+# 中文 X Post Skill v1 基准报告
 
-- Skill: `zh-x-post@1.0.0`
-- Commit: `3ff631d`
-- Fixtures: 60
-- Evaluated candidates: 0
-- Claim preservation: 0%
-- Unsupported facts: 0
-- Certainty escalation: 0%
-- Template hits: 0%
-- Expansion violations: 0%
-- Strategy duplication: 0%
-- Family routing accuracy: 100%
-- Deterministic gate: failed
-- Live blind comparison: credentials_required
-- Live blind win rate: not available
-- Release decision: **HOLD**
-- Rollout enabled: no
+- Skill：`zh-x-post@1.0.0`
+- 提交：`933ef0f`
+- 素材数量：60
+- 已评估候选：0
+- 主张保留率：0%
+- 新增事实：0
+- 确定性升级率：0%
+- 模板命中率：0%
+- 扩写违规率：0%
+- 策略重复率：0%
+- 内容类型路由准确率：100%
+- 确定性门槛：未通过
+- 真实盲测状态：credentials_required
+- 真实盲测胜率：暂无数据
+- 发布决定：**暂缓**
+- 是否开启：否
 
-## Gate failures
+## 门槛失败原因
 
-- missing_outputs
+- 缺少模型生成结果
 
-## Release decision reasons
+## 发布决定原因
 
-- missing_outputs
-- live_blind_comparison_not_run
+- 缺少模型生成结果
+- 尚未运行真实模型盲测
 
-## Missing output fixture IDs
+## 缺少输出的素材 ID
 
 - product-observation-01
 - product-observation-02
@@ -89,6 +89,6 @@
 - workflow-framework-09
 - workflow-framework-10
 
-## Failed fixture IDs
+## 失败素材 ID
 
-- none
+- 无
