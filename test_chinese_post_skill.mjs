@@ -34,12 +34,12 @@ assert.equal(uncertain.forbiddenStructures.includes('competition_bet'), true);
 const strategies = ZH_POST_SKILL.selectCandidateStrategies(uncertain);
 assert.equal(strategies.length, 1);
 assert.deepEqual(strategies.map(item => item.id), [
-  'faithful_sharpening'
+  'scene_note'
 ]);
 
 const framework = ZH_POST_SKILL.analyze({ text: familyCases[5][1] });
 assert.equal(
-  ZH_POST_SKILL.selectCandidateStrategies(framework).some(item => item.id === 'structured_framework'),
+  ZH_POST_SKILL.selectCandidateStrategies(framework).some(item => item.id === 'short_judgment'),
   true
 );
 
@@ -47,17 +47,37 @@ const outside = ZH_POST_SKILL.analyze({ text: '今天的番茄炒蛋少放一点
 assert.equal(outside.supported, false);
 assert.equal(outside.fallbackReason, 'outside_supported_territory');
 
+const signalCases = [
+  ['first_hand_test', 'strong', '昨天我用 Hy3 跑了一个 10 页 PPT，又做了一个 HTML 页面。任务都跑完了，但纯视觉还不够稳。'],
+  ['sourced_update', 'strong', 'Anthropic 7 月 10 日发布了一场 Agent 基础设施对谈，平台负责人分享了团队一线观察。来源：https://example.com/talk'],
+  ['public_feedback', 'medium', 'Claude Code 桌面版右侧 Panel 会把浏览器挤得只剩一点，任务完成后的文件名还不能直接点击。'],
+  ['data_snapshot', 'strong', '这个产品昨天从 Google 获得 11000 次自然流量，其中 3000 人完成注册。'],
+  ['abstract_opinion', 'weak', 'AI 时代真正的竞争，不是模型能力，而是谁更理解用户。'],
+  ['thin_input', 'weak', 'AI 很强。']
+];
+for (const [signalType, sourceStrength, text] of signalCases) {
+  const diagnosis = ZH_POST_SKILL.analyze({ text });
+  assert.equal(diagnosis.signalType, signalType, text);
+  assert.equal(diagnosis.sourceStrength, sourceStrength, text);
+  assert.ok(Array.isArray(diagnosis.availableSignals), text);
+  assert.ok(diagnosis.patternCardId, text);
+}
+
 const candidateInstruction = ZH_POST_SKILL.buildCandidateInstruction(strategies[0], uncertain);
-assert.match(candidateInstruction, /忠实强化/);
+assert.match(candidateInstruction, /现场片段/);
 assert.match(candidateInstruction, /不得把怀疑或可能改成确定事实/);
-assert.match(candidateInstruction, /先写素材里已经出现的具体信号/);
+assert.match(candidateInstruction, /保留素材里的动作、数字、对象、结果或限制/);
 assert.match(candidateInstruction, /写自己如何观察和行动，不要站在高处教别人/);
 assert.match(candidateInstruction, /不得伪造/);
+assert.match(candidateInstruction, /信号类型/);
+assert.match(candidateInstruction, /素材强度/);
+assert.match(candidateInstruction, /停止条件/);
+assert.match(candidateInstruction, /研究语料不提供当前主题/);
 const judgeInstruction = ZH_POST_SKILL.buildJudgeInstruction(uncertain);
 assert.match(judgeInstruction, /自然中文 X 表达/);
 assert.match(judgeInstruction, /硬失败/);
 assert.match(judgeInstruction, /fidelity/);
-assert.match(judgeInstruction, /先看具体证据/);
+assert.match(judgeInstruction, /先看素材里的数字、对象、动作/);
 assert.match(judgeInstruction, /说教/);
 const repairInstruction = ZH_POST_SKILL.buildRepairInstruction(uncertain, ['certainty_escalation']);
 assert.match(repairInstruction, /certainty_escalation/);
@@ -107,6 +127,50 @@ const evidenceFirstOutput = ZH_POST_SKILL.evaluateDeterministically(
 );
 assert.equal(evidenceFirstOutput.approved, true);
 
-assert.equal(ZH_POST_SKILL.version, '1.1.0');
+const richSource = '昨天我用 Hy3 跑了一个 10 页 PPT，又生成了一个 HTML 页面。两个任务都跑完了，但纯视觉还不够稳。';
+const richDiagnosis = ZH_POST_SKILL.analyze({ text: richSource });
+const eraManifesto = ZH_POST_SKILL.evaluateDeterministically(
+  richSource,
+  '这个时代已经彻底变了。未来已来，真正的拐点是 Agent 开始接管所有工作。',
+  richDiagnosis
+);
+assert.equal(eraManifesto.issues.includes('era_manifesto'), true);
+
+const contentFarm = ZH_POST_SKILL.evaluateDeterministically(
+  richSource,
+  '王炸来了：Hy3 的表现太炸裂，这可能是今年最颠覆认知的模型。',
+  richDiagnosis
+);
+assert.equal(contentFarm.issues.includes('content_farm_tone'), true);
+
+const inventedSteps = ZH_POST_SKILL.evaluateDeterministically(
+  richSource,
+  '用好 Hy3 只要三步：第一步写需求，第二步交给 Agent，第三步等待结果。',
+  richDiagnosis
+);
+assert.equal(inventedSteps.issues.includes('invented_steps'), true);
+
+const stackedContrast = ZH_POST_SKILL.evaluateDeterministically(
+  richSource,
+  '这不是模型升级，而是生产关系升级。重要的不是参数，而是认知。',
+  richDiagnosis
+);
+assert.equal(stackedContrast.issues.includes('stacked_contrast'), true);
+
+const droppedSignals = ZH_POST_SKILL.evaluateDeterministically(
+  richSource,
+  '模型能力不错，未来可能会有更多人使用。',
+  richDiagnosis
+);
+assert.equal(droppedSignals.issues.includes('concrete_signal_dropped'), true);
+
+const groundedTest = ZH_POST_SKILL.evaluateDeterministically(
+  richSource,
+  '昨天拿 Hy3 跑了 10 页 PPT 和一个 HTML 页面，两个任务都完成了。纯视觉还不够稳，这部分我暂时不会交给它。',
+  richDiagnosis
+);
+assert.equal(groundedTest.approved, true);
+
+assert.equal(ZH_POST_SKILL.version, '1.2.0');
 
 console.log('Chinese post skill checks passed');

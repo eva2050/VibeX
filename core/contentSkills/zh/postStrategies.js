@@ -1,3 +1,5 @@
+import { getChinesePostPatternCard } from './postCorpus.js';
+
 const SUPPORTED_CHINESE_POST_FAMILIES = Object.freeze([
   'product_observation',
   'tool_experience',
@@ -7,48 +9,30 @@ const SUPPORTED_CHINESE_POST_FAMILIES = Object.freeze([
   'workflow_framework'
 ]);
 
-const STRATEGIES = Object.freeze({
-  faithful_sharpening: Object.freeze({
-    id: 'faithful_sharpening',
-    label: '忠实强化',
-    instruction: '保留原素材的对象、判断、确定性和信息边界，只优化首句、压缩冗余并整理自然节奏。'
-  }),
-  cognitive_reframe: Object.freeze({
-    id: 'cognitive_reframe',
-    label: '认知重构',
-    instruction: '只从原素材已有关系中找到更值得强调的变量、限制或反差，不得另造结论。'
-  }),
-  concrete_scene: Object.freeze({
-    id: 'concrete_scene',
-    label: '具体场景',
-    instruction: '优先使用原素材已经给出的动作、成本、工作流或产品行为承托观点；没有场景时不得编造。'
-  }),
-  structured_framework: Object.freeze({
-    id: 'structured_framework',
-    label: '实操框架',
-    instruction: '保留原素材明确给出的步骤和顺序，压缩成可执行框架；不得补写原文没有的步骤。'
-  }),
-  progress_log: Object.freeze({
-    id: 'progress_log',
-    label: '进展日志',
-    instruction: '围绕原素材已经发生的进展、取舍和结果写成自然进展记录；不得伪造数据或里程碑。'
-  })
-});
+const STRATEGIES = Object.freeze(Object.fromEntries([
+  ['field_test', '实测记录'],
+  ['product_feedback', '产品反馈'],
+  ['data_snapshot', '数据快照'],
+  ['sourced_update', '来源拆解'],
+  ['scene_note', '现场片段'],
+  ['short_judgment', '短判断']
+].map(([id, label]) => [id, Object.freeze({
+  id,
+  label,
+  instruction: getChinesePostPatternCard(id).instruction
+})])));
 
-const FAMILY_RECIPES = Object.freeze({
-  product_observation: '先写素材里的产品行为、使用断点或具体动作，再写它让你看到的问题；不要先宣布一个普遍道理。',
-  tool_experience: '按“我做了什么—遇到什么—为什么留下或放弃”展开，只复用素材已经给出的体验。',
-  build_in_public: '先交代这次具体改了什么和结果，再写这次取舍带来的判断；允许粗糙，不包装成成功学。',
-  failure_retrospective: '先写发生了什么、哪里判断错了、造成什么结果，再写现在如何理解；不把一次经历升级成人人适用的定律。',
-  industry_opinion: '先放出素材里的变化、约束或现象，再给带有边界的个人判断；保留“可能、未必、我觉得”等不确定性。',
-  workflow_framework: '保留素材原有步骤和顺序，用“我怎么做”或直接动作说明，不增加步骤，也不承诺结果。'
-});
-
-const TERRITORY_PATTERN = /AI|人工智能|模型|智能体|agent|产品|工具|软件|SaaS|独立开发|开发者|创业|创作者|内容|工作流|workflow|用户|留存|增长|变现|商业化|交付|发布|上线|代码助手|知识库|Build\s*in\s*public/i;
+const TERRITORY_PATTERN = /AI|人工智能|模型|智能体|agent|产品|工具|软件|SaaS|独立开发|开发者|创业|创作者|内容|工作流|workflow|用户|留存|增长|变现|商业化|交付|发布|上线|代码助手|知识库|Build\s*in\s*public|Codex|Claude|ChatGPT|PPT|HTML|SEO|Google/i;
 const UNCERTAINTY_PATTERN = /怀疑|可能|也许|或许|大概|似乎|看起来|未必|不一定|越来越觉得|我觉得|我猜|恐怕|倾向于|是否|会不会/;
-const EXPERIENCE_PATTERN = /(?:我|我们).{0,10}(?:试了|试过|用了|用过|连续做|做了|上线了|发布了|删掉|删除|改了|踩过|花了|换了|留下来|复盘了)/;
+const EXPERIENCE_PATTERN = /(?:我|我们).{0,14}(?:试了|试过|测试|测了|用了|用过|跑了|连续做|做了|生成了|上线了|发布了|删掉|删除|改了|踩过|花了|换了|留下来|复盘了)/;
+const TEST_PATTERN = /实测|测试|试了|试过|跑了|跑完|体验了|用了|用过|生成了|做了.{0,12}(?:页面|PPT|视频|图片|任务)/;
+const RESULT_PATTERN = /完成|跑完|结果|提升|下降|节省|获得|注册|付费|失败|成功|稳定|不够稳|问题|短板|卡住|崩|不能|可以/;
+const SOURCE_PATTERN = /来源|根据|官方|公告|发布了|对谈|访谈|诉状|报告|研究|测试显示|数据显示|https?:\/\//i;
+const FEEDBACK_PATTERN = /界面|UI|按钮|面板|Panel|客户端|桌面版|入口|分栏|Tab|选项|流程|交互|预览|点击|挤得|找不到|不能直接|不透明|上下文.{0,8}(?:断|接不上)|重新解释/i;
 const COMPETITION_PATTERN = /押注|押中|赌|竞争|对手|阵营|三家|两家|牌局|资源分配/;
 const STEP_PATTERN = /(?:两|三|四|五|六|\d+)步|第一步|第二步|第三步|先.{0,20}再.{0,20}(?:最后|然后)|(?:^|\n)\s*[1-4一二三四][.、）)]/m;
+const ABSTRACT_PATTERN = /时代|趋势|未来|底层|本质|真正的竞争|认知|格局|范式|拐点|红利|新世界|方法论/;
+const TIME_PATTERN = /今天|昨天|本周|这周|刚才|最近|\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}\s*年/;
 
 function normalizeInputText(input = {}) {
   return String(input?.text || input || '').replace(/\r/g, '').trim();
@@ -70,7 +54,7 @@ function inferContentFamily(text = '') {
   if (STEP_PATTERN.test(text) || /方法|框架|流程.{0,10}(?:简单|分为|：)|工作流.{0,10}(?:简单|：)|先.{0,25}再|只问(?:两|三|四|\d+)个问题|验证.{0,8}(?:只看|分为)/.test(text)) {
     return 'workflow_framework';
   }
-  if (EXPERIENCE_PATTERN.test(text) && /AI|模型|产品|工具|软件|SaaS|应用|助手/i.test(text)) {
+  if (EXPERIENCE_PATTERN.test(text) && /AI|模型|产品|工具|软件|SaaS|应用|助手|Codex|Claude|ChatGPT|Hy3/i.test(text)) {
     return 'tool_experience';
   }
   if (/失败|踩.{0,2}坑|做错|没做成|冷启动.{0,8}(?:失败|没)|最大的问题|(?:这次|一次|项目|产品).{0,12}复盘|复盘这次|复盘证明|复盘.{0,12}(?:失败|问题|做错)|我们花了.{0,30}却/.test(text)) {
@@ -82,10 +66,61 @@ function inferContentFamily(text = '') {
   return 'product_observation';
 }
 
-function getLengthBand(family = '') {
-  if (family === 'workflow_framework') return { minRatio: 0.65, maxRatio: 1.55 };
-  if (family === 'build_in_public' || family === 'failure_retrospective') return { minRatio: 0.6, maxRatio: 1.45 };
-  return { minRatio: 0.55, maxRatio: 1.35 };
+function getLengthBand(family = '', sourceStrength = 'medium') {
+  if (sourceStrength === 'weak') return { minRatio: 0.35, maxRatio: 1.1 };
+  if (family === 'workflow_framework') return { minRatio: 0.6, maxRatio: 1.35 };
+  if (family === 'build_in_public' || family === 'failure_retrospective') return { minRatio: 0.55, maxRatio: 1.3 };
+  return { minRatio: 0.45, maxRatio: 1.25 };
+}
+
+function collectAvailableSignals(text = '') {
+  const numbers = extractNumbers(text);
+  const entities = extractEntities(text).filter(value => !/^https?:\/\//i.test(value));
+  return [...new Set([
+    ...(numbers.length ? ['number'] : []),
+    ...(entities.length ? ['named_entity'] : []),
+    ...(EXPERIENCE_PATTERN.test(text) ? ['first_person_action'] : []),
+    ...(TEST_PATTERN.test(text) ? ['test_action'] : []),
+    ...(RESULT_PATTERN.test(text) ? ['result_or_limit'] : []),
+    ...(SOURCE_PATTERN.test(text) ? ['explicit_source'] : []),
+    ...(FEEDBACK_PATTERN.test(text) ? ['product_detail'] : []),
+    ...(STEP_PATTERN.test(text) ? ['explicit_steps'] : []),
+    ...(TIME_PATTERN.test(text) ? ['time_marker'] : [])
+  ])];
+}
+
+function inferSignalType(text = '', availableSignals = []) {
+  const compactLength = String(text).replace(/\s+/g, '').length;
+  if (compactLength <= 8) return 'thin_input';
+  const has = value => availableSignals.includes(value);
+  if (has('first_person_action') && has('test_action')) return 'first_hand_test';
+  if (has('first_person_action') && (has('result_or_limit') || has('number'))) return 'first_hand_result';
+  if (has('explicit_source')) return 'sourced_update';
+  if (has('product_detail')) return 'public_feedback';
+  if (has('number') && (/流量|注册|收入|费用|用户|成绩|调用|转化|增长|下降|提升|节省|每天|每月|小时|天/.test(text) || extractNumbers(text).length >= 2)) {
+    return 'data_snapshot';
+  }
+  if (!ABSTRACT_PATTERN.test(text) && (has('named_entity') || has('result_or_limit') || text.length >= 28)) {
+    return 'concrete_observation';
+  }
+  return 'abstract_opinion';
+}
+
+function inferSourceStrength(signalType = '', availableSignals = []) {
+  if (['thin_input', 'abstract_opinion'].includes(signalType)) return 'weak';
+  if (['first_hand_test', 'first_hand_result', 'sourced_update', 'data_snapshot'].includes(signalType)) {
+    return availableSignals.length >= 2 ? 'strong' : 'medium';
+  }
+  return 'medium';
+}
+
+function getPatternCardId(signalType = '') {
+  if (signalType === 'first_hand_test') return 'field_test';
+  if (signalType === 'first_hand_result' || signalType === 'data_snapshot') return 'data_snapshot';
+  if (signalType === 'sourced_update') return 'sourced_update';
+  if (signalType === 'public_feedback') return 'product_feedback';
+  if (signalType === 'concrete_observation') return 'scene_note';
+  return 'short_judgment';
 }
 
 function diagnoseChinesePostInput(input = {}) {
@@ -97,81 +132,91 @@ function diagnoseChinesePostInput(input = {}) {
     : 'assertive';
   const hasFirstPersonExperience = EXPERIENCE_PATTERN.test(sourceText);
   const hasCompetitionRelation = COMPETITION_PATTERN.test(sourceText);
+  const availableSignals = supported ? collectAvailableSignals(sourceText) : [];
+  const signalType = supported ? inferSignalType(sourceText, availableSignals) : 'unsupported';
+  const sourceStrength = supported ? inferSourceStrength(signalType, availableSignals) : 'weak';
+  const patternCardId = availableSignals.includes('explicit_steps')
+    ? 'short_judgment'
+    : getPatternCardId(signalType);
   const forbiddenStructures = [
     ...(!hasFirstPersonExperience ? ['invented_experience'] : []),
     ...(certainty === 'uncertain' ? ['certainty_escalation'] : []),
-    ...(!hasCompetitionRelation ? ['competition_bet'] : [])
+    ...(!hasCompetitionRelation ? ['competition_bet'] : []),
+    ...(!availableSignals.includes('explicit_steps') ? ['invented_steps'] : [])
   ];
-  const recommendedStructures = family === 'workflow_framework'
-    ? ['structured_framework']
-    : family === 'build_in_public'
-      ? ['progress_log']
-      : ['tool_experience', 'failure_retrospective'].includes(family)
-        ? ['concrete_scene']
-        : family === 'industry_opinion'
-          ? ['cognitive_reframe']
-          : ['faithful_sharpening'];
+  const entities = extractEntities(sourceText);
+  const numbers = extractNumbers(sourceText);
   return Object.freeze({
     supported,
     family,
     sourceText,
     certainty,
+    signalType,
+    sourceStrength,
+    patternCardId,
     hasFirstPersonExperience,
     hasCompetitionRelation,
-    entities: Object.freeze(extractEntities(sourceText)),
-    numbers: Object.freeze(extractNumbers(sourceText)),
-    concreteSignals: Object.freeze([
-      ...(extractNumbers(sourceText).length ? ['number'] : []),
-      ...(hasFirstPersonExperience ? ['supplied_experience'] : []),
-      ...(STEP_PATTERN.test(sourceText) ? ['explicit_steps'] : [])
-    ]),
-    recommendedStructures: Object.freeze(recommendedStructures),
+    entities: Object.freeze(entities),
+    numbers: Object.freeze(numbers),
+    availableSignals: Object.freeze(availableSignals),
+    concreteSignals: Object.freeze(availableSignals),
+    recommendedStructures: Object.freeze([patternCardId]),
     forbiddenStructures: Object.freeze(forbiddenStructures),
-    targetLength: Object.freeze(getLengthBand(family)),
+    targetLength: Object.freeze(getLengthBand(family, sourceStrength)),
     fallbackReason: supported ? '' : 'outside_supported_territory'
   });
 }
 
 function selectChinesePostStrategies(diagnosis = {}) {
-  const ids = Array.isArray(diagnosis.recommendedStructures)
-    ? diagnosis.recommendedStructures
-    : [];
-  const selectedId = [...new Set(ids)].find(id => STRATEGIES[id]) || 'faithful_sharpening';
+  const selectedId = STRATEGIES[diagnosis.patternCardId]
+    ? diagnosis.patternCardId
+    : 'short_judgment';
   return [STRATEGIES[selectedId]];
 }
 
 function buildChineseCandidateInstruction(strategy = {}, diagnosis = {}) {
+  const card = getChinesePostPatternCard(diagnosis.patternCardId || strategy.id);
   const certaintyRule = diagnosis.certainty === 'uncertain'
     ? '原素材是怀疑、可能或未确认判断；不得把怀疑或可能改成确定事实。'
     : '保持原素材的确定性，不得额外夸大。';
   const experienceRule = diagnosis.hasFirstPersonExperience
     ? '只能使用原素材已经提供的第一人称经历。'
     : '原素材没有可用的第一人称经历，不得伪造“我做过/我用了/我发现”的故事。';
+  const weakRule = diagnosis.sourceStrength === 'weak'
+    ? '素材很薄：正文只能同样短。不要补比喻、步骤、共识、趋势或人生结论来制造深度。'
+    : '保留素材里的动作、数字、对象、结果或限制，不要把它们压成抽象总结。';
   return [
-    `[中文 X Skill：${strategy.label || strategy.id || '候选策略'}]`,
-    strategy.instruction || '',
-    `内容类型：${diagnosis.family || 'unknown'}`,
-    `成稿结构：${FAMILY_RECIPES[diagnosis.family] || FAMILY_RECIPES.product_observation}`,
-    '先写素材里已经出现的具体信号：数字、人物、动作、产品行为、对话或过程。具体信号至少出现一个，然后再写判断。',
-    '如果素材只有一个薄观点，就忠实写短，不要用空泛金句把它伪装成深度。',
+    `[中文 X Skill：${strategy.label || strategy.id || '短判断'}]`,
+    `信号类型：${diagnosis.signalType || 'unknown'}`,
+    `素材强度：${diagnosis.sourceStrength || 'weak'}`,
+    `本稿形状：${card.instruction}`,
+    `停止条件：${card.stopCondition}`,
+    weakRule,
+    '研究语料不提供当前主题、事实或句子；当前正文的主题只能来自用户这次输入。',
     '素材提供第一人称时，写自己如何观察和行动，不要站在高处教别人怎么做；素材没有第一人称时，不得伪造。',
     certaintyRule,
     experienceRule,
+    diagnosis.availableSignals?.includes('explicit_steps')
+      ? '素材明确给出了步骤，可以保留原顺序，但不得增加步骤。'
+      : '素材没有明确步骤，不得生成“第一、第二、第三”或“三步法”。',
     diagnosis.forbiddenStructures?.includes('competition_bet')
       ? '原素材没有牌局、竞争或资源分配关系，不得使用“押、赌、下半场、谁赢了”等结构。'
       : '',
-    '像中文 X 用户自然说话。可以口语化、可以有不完美的停顿，但每一段都必须增加新信息。',
+    '不要写时代宣言，不要使用王炸、炸裂、必看、颠覆认知等内容农场词。避免成组“不是 A，而是 B”。',
+    '像当事人在 X 上刚好说到这件事：可以短、可以有情绪、可以不完整，但不能把空洞包装成完整。',
     '只返回一篇可以直接发布的正文，不给候选、不解释写作过程。'
   ].filter(Boolean).join('\n');
 }
 
 export {
   STRATEGIES,
-  FAMILY_RECIPES,
   SUPPORTED_CHINESE_POST_FAMILIES,
   buildChineseCandidateInstruction,
+  collectAvailableSignals,
   diagnoseChinesePostInput,
   extractEntities,
   extractNumbers,
+  getPatternCardId,
+  inferSignalType,
   selectChinesePostStrategies
 };

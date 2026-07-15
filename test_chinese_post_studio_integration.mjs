@@ -42,12 +42,16 @@ const result = await orchestrateStudioGeneration({
 }, model);
 
 assert.deepEqual(result.candidates.map(item => item.strategyId), [
-  'faithful_sharpening'
+  'product_feedback'
 ]);
 assert.equal(result.contentSkill.id, 'zh-x-post');
-assert.equal(result.contentSkill.version, '1.1.0');
+assert.equal(result.contentSkill.version, '1.2.0');
 assert.equal(result.contentFamily, 'product_observation');
 assert.match(model.calls[1], /自然中文 X 表达/);
+assert.match(model.calls[0], /信号类型/);
+assert.match(model.calls[0], /素材强度/);
+assert.match(model.calls[0], /停止条件/);
+assert.match(model.calls[0], /研究语料不提供当前主题/);
 assert.equal(model.calls.length, 2);
 assert.equal(result.candidates.length, 1);
 
@@ -60,14 +64,14 @@ const session = buildStudioSessionFromResult({
   now: 1700000000000
 });
 assert.equal(session.contentSkillId, 'zh-x-post');
-assert.equal(session.contentSkillVersion, '1.1.0');
+assert.equal(session.contentSkillVersion, '1.2.0');
 assert.equal(session.contentFamily, 'product_observation');
 assert.deepEqual(session.candidateStrategyIds, [
-  'faithful_sharpening'
+  'product_feedback'
 ]);
 const switchedSession = selectGenerationCandidate(session, 'candidate-a', 1700000000010);
 assert.equal(switchedSession.contentSkillId, 'zh-x-post');
-assert.equal(switchedSession.contentSkillVersion, '1.1.0');
+assert.equal(switchedSession.contentSkillVersion, '1.2.0');
 
 const englishModel = queuedModel([
   'A repeated workflow matters more than a demo.',

@@ -48,6 +48,7 @@ assert.equal(report.templateHitRate, 0);
 assert.equal(report.strategyDuplicationRate, 0);
 assert.equal(report.familyRoutingAccuracy, 1);
 assert.equal(report.releaseGate.deterministicPassed, true);
+assert.equal(report.skillVersion, '1.2.0');
 
 const missing = evaluateChinesePostBenchmark([fixture], []);
 assert.equal(missing.releaseGate.deterministicPassed, false);

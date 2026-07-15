@@ -76,7 +76,7 @@ function markdownReport(report) {
   };
   const reason = value => reasonLabels[value] || value;
   return [
-    '# 中文 X Post Skill v1.1 离线回归报告',
+    '# 中文 X Post Skill v1.2 离线回归报告',
     '',
     `- Skill：\`${report.skillId}@${report.skillVersion}\``,
     `- 提交：\`${report.commit}\``,

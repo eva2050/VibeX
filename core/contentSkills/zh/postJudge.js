@@ -15,15 +15,20 @@ const TEMPLATE_PATTERNS = [
 const LECTURE_OPENING_PATTERN = /^(?:真正重要的是|真正的问题是|本质上|说到底|归根结底|记住|你要明白|大多数人|很多人之所以)/;
 const PAIRED_SLOGAN_PATTERN = /[^。！？\n]{1,18}决定[^。！？\n]{1,20}[，,；;][^。！？\n]{1,18}决定/;
 const DIRECTIVE_PATTERN = /你(?:应该|必须|一定要|要|得|千万)/g;
+const CONTENT_FARM_PATTERN = /王炸|炸裂|恐怖(?:的)?(?:查看|数据|能力|增长)?|绝对(?:是|必看)|必看(?:文章|清单|指南)?|彻底说透|颠覆认知|改命|黄金窗口|干货拉满|怪物级|还等什么|赶紧(?:上|冲|试)|真正能用的模型|兄弟们/;
+const ERA_MANIFESTO_PATTERN = /这个时代(?:已经)?|未来已来|真正的拐点|时代的拐点|底层真相|新世界(?:已经|正在)|彻底告别过去|历史性的时刻|生产关系升级|重新定义一切/;
+const OUTPUT_STEP_PATTERN = /(?:两|三|四|五|六|\d+)步|第一步|第二步|第三步|(?:^|\n)\s*[1-6一二三四五六][.、）)]/m;
+const CONTRAST_PATTERN = /(?:不是|不在于|重要的不是|关键不是)[^。！？\n]{0,32}(?:而是|是在于|是)/g;
 
 function buildChineseJudgeInstruction(diagnosis = {}) {
   return [
     '[中文 X Post Skill 独立评审]',
     '只返回有效 JSON。使用自然中文 X 表达标准，不使用通用作文标准。',
-    '先看具体证据是否在观点前出现：数字、人物、动作、产品行为、对话或过程至少有一个来自素材；再看观点是否由这些证据自然长出来。',
+    `素材信号类型：${diagnosis.signalType || 'unknown'}；素材强度：${diagnosis.sourceStrength || 'weak'}。`,
+    '先看素材里的数字、对象、动作、产品行为、来源或限制有没有被保留，再看正文是否在该说完的地方停止。',
     '评分：观点与确定性忠实度 fidelity 25；具体信息 specificity 20；自然中文 naturalness 20；首句 hook 15；收藏/转发/讨论价值 audienceValue 10；账号匹配 accountFit 10。',
-    '自然中文重点检查：像本人分享观察，不像老师给所有人上课；允许口语和粗糙，不奖励对仗金句、宏大总结或精致空话。',
-    '硬失败不能被总分抵消：新增事实、伪造经历、跑题、错语言、确定性升级、强套原文不支持的结构、明显营销号腔、翻译腔或说教腔。',
+    '自然中文重点检查：像当事人刚好说到这件事，不像老师给所有人上课；允许短、口语、情绪和不完整，不奖励完整作文。',
+    '硬失败不能被总分抵消：新增事实、伪造经历、丢掉强素材的具体信号、跑题、错语言、确定性升级、无来源步骤、时代宣言、内容农场腔、成组伪反差、翻译腔或说教腔。',
     `原素材类型：${diagnosis.family || 'unknown'}；确定性：${diagnosis.certainty || 'unknown'}。`,
     '本次只有一篇初稿。返回格式：{"selectedCandidateId":"candidate-a","scores":[{"id":"candidate-a","total":0,"fidelity":0,"specificity":0,"naturalness":0,"hook":0,"audienceValue":0,"accountFit":0,"hardFailures":[]}],"rationale":""}'
   ].join('\n');
@@ -34,8 +39,9 @@ function buildChineseRepairInstruction(diagnosis = {}, failures = []) {
     '[中文 X Post Skill 修复]',
     `只修复失败项：${JSON.stringify(Array.isArray(failures) ? failures : [failures])}。`,
     '不得借修复之名增加新事实、经历、对象、数字或更强结论。',
-    '如果开头像老师下结论，改成素材中最具体的事件、动作或现象；让判断出现在证据之后。',
-    '删除对仗金句和“你应该”式命令，把它改成个人观察或有边界的判断。',
+    '如果丢了素材信号，恢复原文已有的数字、对象、动作、产品行为、来源或限制。',
+    '如果像老师下结论，改成当事人的现场、实测、产品摩擦或短反应；没有必要时不要补结尾。',
+    '删除时代宣言、内容农场词、无来源步骤、成组对仗和“你应该”式命令。',
     diagnosis.certainty === 'uncertain' ? '恢复原素材的怀疑或可能语气。' : '',
     '返回修复后的正文，不解释。'
   ].filter(Boolean).join('\n');
@@ -78,6 +84,30 @@ function hasLectureTone(output = '') {
     || directives.length >= 2;
 }
 
+function hasInventedSteps(output = '', diagnosis = {}) {
+  return diagnosis.forbiddenStructures?.includes('invented_steps')
+    && OUTPUT_STEP_PATTERN.test(String(output || ''));
+}
+
+function hasStackedContrast(output = '') {
+  const matches = String(output || '').match(CONTRAST_PATTERN) || [];
+  return matches.length >= 2;
+}
+
+function hasConcreteSignalDropped(output = '', diagnosis = {}) {
+  if (diagnosis.sourceStrength !== 'strong') return false;
+  const genericEntities = new Set(['ai', 'agent', 'workflow', 'build', 'public']);
+  const anchors = [
+    ...(diagnosis.numbers || []),
+    ...(diagnosis.entities || [])
+      .filter(value => !/^https?:\/\//i.test(value))
+      .filter(value => !genericEntities.has(String(value).toLowerCase()))
+  ];
+  if (anchors.length === 0) return false;
+  const normalized = String(output || '').toLowerCase();
+  return !anchors.some(anchor => normalized.includes(String(anchor).toLowerCase()));
+}
+
 function evaluateChinesePostOutput(source = '', output = '', diagnosis = {}) {
   const text = String(output || '').trim();
   const issues = [];
@@ -88,6 +118,11 @@ function evaluateChinesePostOutput(source = '', output = '', diagnosis = {}) {
   if (hasInventedFirstPerson(text, diagnosis)) issues.push('invented_first_person');
   if (TEMPLATE_PATTERNS.some(pattern => pattern.test(text))) issues.push('template_tone');
   if (hasLectureTone(text)) issues.push('lecture_tone');
+  if (CONTENT_FARM_PATTERN.test(text)) issues.push('content_farm_tone');
+  if (ERA_MANIFESTO_PATTERN.test(text)) issues.push('era_manifesto');
+  if (hasInventedSteps(text, diagnosis)) issues.push('invented_steps');
+  if (hasStackedContrast(text)) issues.push('stacked_contrast');
+  if (hasConcreteSignalDropped(text, diagnosis)) issues.push('concrete_signal_dropped');
   const sourceLength = Math.max(1, normalizedLength(source));
   const maxRatio = Number(diagnosis.targetLength?.maxRatio) || 1.5;
   if (normalizedLength(text) / sourceLength > maxRatio) issues.push('excessive_expansion');
@@ -101,14 +136,20 @@ function evaluateChinesePostOutput(source = '', output = '', diagnosis = {}) {
 export {
   TEMPLATE_PATTERNS,
   DIRECTIVE_PATTERN,
+  CONTENT_FARM_PATTERN,
+  ERA_MANIFESTO_PATTERN,
   LECTURE_OPENING_PATTERN,
+  OUTPUT_STEP_PATTERN,
   PAIRED_SLOGAN_PATTERN,
   buildChineseJudgeInstruction,
   buildChineseRepairInstruction,
   evaluateChinesePostOutput,
   hasCertaintyEscalation,
+  hasConcreteSignalDropped,
+  hasInventedSteps,
   hasInventedFirstPerson,
   hasLectureTone,
+  hasStackedContrast,
   hasUnsupportedEntities,
   hasUnsupportedNumbers
 };
