@@ -145,4 +145,22 @@ assert.match(rewriteContext.performanceMemoryPrompt, /rewrite-only rule/);
 assert.doesNotMatch(rewriteContext.performanceMemoryPrompt, /candidate rewrite rule/);
 assert.doesNotMatch(rewriteContext.performanceMemoryPrompt, /japanese rewrite rule/);
 
+const boundedContext = buildGenerationContext({
+  engineLanguage: 'en',
+  styleTrainingData: ['style-one', 'style-two', 'style-three', 'style-four'],
+  feedbackLoopData: [1, 2, 3, 4].map(index => ({
+    original: `original-${index}`,
+    modified: `modified-${index}`
+  })),
+  feedbackLikes: [1, 2, 3, 4].map(index => ({ text: `liked-${index}` })),
+  feedbackDislikes: [1, 2, 3, 4].map(index => ({ text: `disliked-${index}` }))
+}, { promptType: 'viral_rewrite', objective: 'studio_rewrite', lang: 'en' });
+assert.doesNotMatch(boundedContext.stylePrompt, /style-one/);
+assert.match(boundedContext.stylePrompt, /style-four/);
+assert.doesNotMatch(boundedContext.editFeedbackPrompt, /original-1/);
+assert.match(boundedContext.editFeedbackPrompt, /original-4/);
+assert.doesNotMatch(boundedContext.preferencePrompt, /liked-1|disliked-1/);
+assert.match(boundedContext.preferencePrompt, /liked-4/);
+assert.match(boundedContext.preferencePrompt, /disliked-4/);
+
 console.log('loop/context checks passed');

@@ -84,7 +84,15 @@ function getRewriteStructureRules() {
 - 只输出最终改写正文，不要解释。`;
 }
 
-function buildViralRewritePromptPrefix({ errorMsgText = '', persona = {} } = {}) {
+const WRITER_ROLE = {
+  zh: '你是一位擅长自然、具体表达的 X 写作者。',
+  en: 'You are a natural, specific X writer who turns ordinary ideas into concise posts with a clear point of view.',
+  ja: 'あなたは自然で具体的な表現を得意とするXライターです。',
+  es: 'Eres un escritor de X con un estilo natural, específico y con criterio propio.',
+  id: 'Anda adalah penulis X dengan gaya yang alami, konkret, dan memiliki sudut pandang yang jelas.'
+};
+
+function buildViralRewritePromptPrefix({ errorMsgText = '', persona = {}, engineLanguage = 'zh' } = {}) {
   const personaText = persona?.characteristics || persona?.goals
     ? `【账号定位】：
 ${persona.characteristics || '未填写'}
@@ -95,7 +103,8 @@ ${persona.goals || '未填写'}
 `
     : '';
 
-  return `你是一个顶级 X 中文写作者，擅长把普通观点改写成有判断力、有结构感、像高赞原生推文的表达。
+  const writerRole = WRITER_ROLE[engineLanguage] || WRITER_ROLE.en;
+  return `${writerRole}
 
 ${personaText}${getRewriteStructureRules()}
 
@@ -130,6 +139,7 @@ ${getRewriteStructureRules()}
 }
 
 export {
+  WRITER_ROLE,
   buildDirectRewritePrompt,
   buildViralRewritePromptPrefix,
   getRewriteStructureRules

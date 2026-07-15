@@ -38,6 +38,7 @@ function buildStudioPrompt({
   inputLockConstraint = '',
   strictAntiAI = '',
   regenerateConstraint = '',
+  candidateBrief = '',
   includePerformanceMemory = true,
   includeTopPerformanceSamples = false,
   sourceLabel = '【待处理文本 - 唯一主题来源】'
@@ -64,6 +65,7 @@ function buildStudioPrompt({
     section('【高表现样本（默认不参与主题选择）】', topPerformance),
     strictAntiAI,
     buildStudioQualityGateRules(promptType),
+    section('【本候选的结构策略】', candidateBrief),
     regenerateConstraint || buildStudioRegenerateInstruction(false),
     `${sourceLabel}：\n${textToProcess}`
   ].filter(Boolean).join('');

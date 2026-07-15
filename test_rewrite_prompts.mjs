@@ -55,6 +55,14 @@ assert.match(prefix, /变量反转结构/);
 assert.match(prefix, /短刀结构/);
 assert.doesNotMatch(prefix, /千万级爆款操盘手|Dwell Time|自然.*Emoji/);
 
+const englishPrefix = buildViralRewritePromptPrefix({
+  engineLanguage: 'en',
+  errorMsgText: 'extract failed',
+  persona: {}
+});
+assert.match(englishPrefix, /natural, specific X writer/i);
+assert.doesNotMatch(englishPrefix, /顶级 X 中文写作者/);
+
 const direct = buildDirectRewritePrompt({
   author: 'bornanit',
   text: '京东赌中产，淘宝赌贫困减少，拼多多赌贫困变多。',

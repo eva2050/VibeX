@@ -162,7 +162,7 @@ function formatPlaybookForPrompt(playbook = {}) {
 }
 
 function formatStyleTrainingForPrompt(styleTrainingData) {
-  const learning = formatStyleSampleLearningForPrompt(styleTrainingData, { limit: 5 });
+  const learning = formatStyleSampleLearningForPrompt(styleTrainingData, { limit: 3 });
   if (!learning) return '';
   return `\n<优质样本>\n${learning}\n</优质样本>\n\n【极度严格的输出约束】：\n1. 你必须只学习优质样本的“活人感、具体观察、轻判断、自然短文”风格。\n2. 学习样本的 Hook 方式、断句节奏和留白格式。\n3. 严禁使用任何常见 AI 模板（如“最反直觉的一点是”、“底层逻辑是”、“本质是”）。\n4. 如果输入素材太短，绝对不要把它硬扩写成长篇大论，请保持短小精悍的观察或吐槽。\n5. 严禁借用样本的具体题材、产品名或业务数据；不要编造年份或不存在的行业报告。\n6. 输出语言必须完全服从后台 Engine Language，不跟随素材语种。\n\n`;
 }
@@ -172,14 +172,14 @@ function formatPreferenceMemoryForPrompt(config = {}, promptType = '') {
   let text = '';
   if (Array.isArray(config.feedbackLikes) && config.feedbackLikes.length > 0) {
     const likes = config.feedbackLikes
-      .slice(-10)
+      .slice(-3)
       .map((fb, idx) => `[正面案例 ${idx + 1}]\n${truncateForPrompt(fb.text, 500)}`)
       .join('\n\n');
     text += `\n【正面偏好】：用户喜欢以下输出的风格和口吻，后续生成应优先靠近这种调性：\n<正面案例>\n${likes}\n</正面案例>\n`;
   }
   if (Array.isArray(config.feedbackDislikes) && config.feedbackDislikes.length > 0) {
     const dislikes = config.feedbackDislikes
-      .slice(-10)
+      .slice(-3)
       .map((fb, idx) => `[反面案例 ${idx + 1}]\n${truncateForPrompt(fb.text, 500)}`)
       .join('\n\n');
     text += `\n【反面偏好】：用户讨厌以下输出的风格，本次生成必须避免类似语气、句式或套路：\n<反面案例>\n${dislikes}\n</反面案例>\n`;
@@ -191,7 +191,7 @@ function formatEditFeedbackForPrompt(feedbackLoopData, promptType = '') {
   if (!Array.isArray(feedbackLoopData) || feedbackLoopData.length === 0) return '';
   if (!['viral_rewrite', 'draft_reply', 'auto_post'].includes(promptType)) return '';
   const feedbackExamples = feedbackLoopData
-    .slice(-10)
+    .slice(-3)
     .map((fb, idx) => [
       `[示例 ${idx + 1}]`,
       `- 你的原输出：${truncateForPrompt(fb.original, 500)}`,

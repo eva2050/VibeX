@@ -74,9 +74,61 @@ function isOverExpanded(output = '', input = '') {
   return outputLength > Math.max(420, inputLength * 1.35);
 }
 
+function detectScriptFamily(text = '') {
+  const value = String(text || '');
+  const kanaCount = (value.match(/[\u3040-\u30ff]/g) || []).length;
+  const hanCount = (value.match(/[\u3400-\u9fff]/g) || []).length;
+  const latinCount = (value.match(/[A-Za-zÀ-ÿ]/g) || []).length;
+  if (kanaCount >= 2) return 'ja';
+  if (hanCount >= 2 && hanCount >= latinCount) return 'zh';
+  if (latinCount >= 3) return 'latin';
+  return 'unknown';
+}
+
+function hasLanguageMismatch(text = '', engineLanguage = '') {
+  const expected = String(engineLanguage || '').toLowerCase();
+  if (!expected || expected === 'auto' || expected === 'unknown') return false;
+  const actual = detectScriptFamily(text);
+  if (actual === 'unknown') return false;
+  if (expected === 'zh') return actual !== 'zh';
+  if (expected === 'ja') return actual !== 'ja';
+  if (['en', 'es', 'id'].includes(expected)) return actual !== 'latin';
+  return false;
+}
+
+const TOPIC_STOP_WORDS = new Set([
+  'the', 'and', 'that', 'this', 'with', 'from', 'when', 'what', 'your', 'into',
+  'more', 'than', 'does', 'not', 'are', 'but', 'for', 'you', 'its', 'people',
+  '一个', '不是', '就是', '这个', '那个', '因为', '所以', '如果', '没有'
+]);
+
+function getTopicTokens(text = '') {
+  const value = String(text || '').toLowerCase();
+  const latin = (value.match(/[a-zà-ÿ][a-zà-ÿ0-9_-]{2,}/g) || [])
+    .filter(token => !TOPIC_STOP_WORDS.has(token));
+  const cjkRuns = value.match(/[\u3400-\u9fff\u3040-\u30ff]{2,}/g) || [];
+  const cjk = cjkRuns.flatMap((run) => {
+    if (run.length === 2) return [run];
+    return Array.from({ length: run.length - 1 }, (_, index) => run.slice(index, index + 2));
+  }).filter(token => !TOPIC_STOP_WORDS.has(token));
+  return new Set([...latin, ...cjk]);
+}
+
+function hasTopicDrift(input = '', output = '') {
+  const inputFamily = detectScriptFamily(input);
+  const outputFamily = detectScriptFamily(output);
+  if (inputFamily !== 'unknown' && outputFamily !== 'unknown' && inputFamily !== outputFamily) {
+    return false;
+  }
+  const inputTokens = getTopicTokens(input);
+  const outputTokens = getTopicTokens(output);
+  if (inputTokens.size < 2 || outputTokens.size < 2) return false;
+  return ![...inputTokens].some(token => outputTokens.has(token));
+}
+
 function assessStudioOutputQuality(input = '', output = {}, options = {}) {
   const text = typeof output === 'string' ? output : String(output?.text || '');
-  const rules = options.rules || {};
+  const rules = { ...(options.rules || {}), ...options };
   const issues = [];
   const normalized = compactWhitespace(text);
 
@@ -85,6 +137,8 @@ function assessStudioOutputQuality(input = '', output = {}, options = {}) {
   if (hasUnsupportedHardFacts(text, input)) issues.push('unsupported_hard_facts');
   if (isOverSegmented(text, input)) issues.push('over_segmented');
   if (isOverExpanded(text, input)) issues.push('over_expanded');
+  if (hasLanguageMismatch(text, rules.engineLanguage)) issues.push('language_mismatch');
+  if (rules.requireTopicOverlap && hasTopicDrift(input, text)) issues.push('topic_drift');
   if (rules.requireConcreteSignal !== false && !hasConcreteSignal(text)) issues.push('no_concrete_signal');
   if (rules.forbidMarkdown !== false && /(^|\n)\s*#{1,6}\s|\*\*|__|```/.test(text)) issues.push('markdown_artifacts');
   if (rules.forbidHashtags !== false && /(^|\s)#\S+/.test(text)) issues.push('hashtag');
@@ -100,7 +154,9 @@ function assessStudioOutputQuality(input = '', output = {}, options = {}) {
 export {
   assessStudioOutputQuality,
   hasConcreteSignal,
+  hasLanguageMismatch,
   hasTemplateTone,
+  hasTopicDrift,
   hasUnsupportedHardFacts,
   isOverExpanded,
   isOverSegmented
