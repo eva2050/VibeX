@@ -4,13 +4,13 @@ import { buildGenerationContext } from '../core/generationContext.js';
 import { getLanguageInstruction, getPromptText, normalizeEngineLanguage } from '../core/i18n.js';
 import { buildLegacyReplyStrategyPrompt } from '../core/replyStrategies.js';
 import { buildDirectRewritePrompt, buildViralRewritePromptPrefix } from '../core/rewritePrompts.js';
-import { getBannedClichePhrasesRule } from '../core/contentRules.js';
 import { buildStudioPrompt, buildStudioRegenerateInstruction } from '../core/studioPrompt.js';
 import { orchestrateStudioGeneration } from '../core/studioGeneration.js';
 import { buildStudioSessionFromResult } from '../core/generationAttribution.js';
 import { resolveContentSkill } from '../core/contentSkills/registry.js';
 import '../core/contentSkills/zh/postSkill.js';
 import { fetchWithTimeout } from '../utils/fetchUtils.js';
+import { buildInputLockedRewriteRules } from '../core/studioRewriteInput.js';
 
 function prependGenerationSession(session) {
   return new Promise((resolve) => {
@@ -31,51 +31,6 @@ function notifyStudioPhase(phase, streamId = '') {
   } catch (_) {
     // The requesting extension page may have closed while generation continued.
   }
-}
-
-function detectInputLanguage(text = '') {
-  const source = String(text || '')
-    .replace(/https?:\/\/\S+/gi, ' ')
-    .replace(/www\.\S+/gi, ' ')
-    .replace(/\[从链接[^\]]*\]/g, ' ')
-    .replace(/\[用户补充说明\]/g, ' ')
-    .replace(/\[extracted from link[^\]]*\]/gi, ' ')
-    .replace(/\[user note\]/gi, ' ');
-  if (/[\u3400-\u9fff]/.test(source)) return 'zh';
-  if (/[\u3040-\u30ff]/.test(source)) return 'ja';
-  if (/[¿¡ñáéíóúü]/i.test(source)) return 'es';
-  if (/[A-Za-z]/.test(source)) return 'en';
-  return '';
-}
-
-function buildInputLockedRewriteRules(text = '', outputLang = '') {
-  const detectedLang = detectInputLanguage(text);
-  const normalizedText = String(text || '').replace(/\s+/g, ' ').trim();
-  const inputLength = normalizedText.length;
-  const maxChineseChars = inputLength <= 90 ? 120 : inputLength <= 220 ? 220 : 360;
-  const languageNames = {
-    zh: '中文',
-    en: 'English',
-    ja: 'Japanese',
-    es: 'Spanish',
-    id: 'Indonesian'
-  };
-  const languageRule = detectedLang
-    ? `【待处理文本】的输入语言是 ${languageNames[detectedLang] || detectedLang}，这只用于理解原意。最终输出必须遵守后台 Engine Language/上方语言约束，不要跟随输入语言，也不要被账号样本或历史记忆带成其他语言。`
-    : '最终输出必须遵守后台 Engine Language/上方语言约束；只重写表达，不改变主题。';
-  return `\n\n【最高优先级 - 输入锁定】：
-1. 【待处理文本】是本次唯一主题来源，必须围绕它改写。
-2. 严禁把账号高表现样本、账号简介、产品名或历史记忆当成本次主题。
-3. 严禁无中生有改成 VibeX、Agents、产品发布、创业宣言等与原文无关的内容。
-4. 历史样本只能参考节奏、Hook 强度和排版，不能复述、借题发挥或替换主题。
-5. ${languageRule}
-6. 改写只能提高表达质量、结构和 X 原生感；不得新增原文没有的核心事件、对象、结论或行动号召。
-7. 如果原文是怀疑、吐槽、反问或主观感受，输出也必须保持这个证据强度；不得升级成确定事实、内幕判断或商业定论。
-8. 不要强行套用历史样本里的隐喻、对象关系或结尾金句；只有原文本身已经具备相同结构时才可使用。
-9. 长度预算：本次输出最多约 ${maxChineseChars} 个中文字符。除非用户明确要求 thread/长文，否则不要超过这个预算。
-10. 如果【待处理文本】很短，输出也要保持短；不要扩写成长帖。
-11. 排版预算：如果原文是社会性现象/群体心理类的散文式论述（适合“排比金句结构”），允许拆成 4-8 个短句、每句单独一行；其余情况默认 1 段，最多 2 段，不要每句话单独换行，不要不必要地每句后空一行。
-12. 禁用没有信息量的空话套壳：${getBannedClichePhrasesRule()}`;
 }
 
 function delay(ms = 0) {
