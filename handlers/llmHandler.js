@@ -287,7 +287,10 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
               includePerformanceMemory: req.promptType === 'viral_rewrite'
             }, {
               callModel: prompt => callLLM(prompt, config, false),
-              onPhase: phase => notifyStudioPhase(phase, req.streamId || '')
+              onPhase: (phase) => {
+                addLog('info', 'studio_generation_phase', [generationId, phase]);
+                notifyStudioPhase(phase, req.streamId || '');
+              }
             });
             const xUser = config.xAuth?.user || {};
             const session = buildStudioSessionFromResult({
@@ -300,6 +303,7 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
               engineLanguage: config.engineLanguage
             });
             await prependGenerationSession(session);
+            addLog('success', 'studio_generation_phase', [generationId, 'complete']);
             notifyStudioPhase('complete', req.streamId || '');
             sendResponse({
               success: true,
@@ -309,6 +313,7 @@ export function handleLLMMessage(request, sender, sendResponse, context) {
               quality: result.quality
             });
           } catch (error) {
+            addLog('error', 'studio_generation_phase', [generationId, 'failed']);
             notifyStudioPhase('failed', req.streamId || '');
             sendResponse({ success: false, error: error.message });
           }

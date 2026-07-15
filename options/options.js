@@ -485,11 +485,11 @@ function setupContextListener() {
       if (request.streamId && request.streamId !== window.currentStreamId) return;
       const phase = document.getElementById('studio-generation-phase');
       const labels = {
-        generating_candidates: 'Generating candidates…',
-        judging_candidates: 'Reviewing candidates…',
-        repairing_candidate: 'Repairing the best draft…',
-        complete: 'Ready',
-        failed: 'Generation failed'
+        generating_candidates: t('studio_phase_generating', 'Generating candidates…'),
+        judging_candidates: t('studio_phase_judging', 'Reviewing candidates…'),
+        repairing_candidate: t('studio_phase_repairing', 'Repairing the best draft…'),
+        complete: t('studio_phase_ready', 'Ready'),
+        failed: t('studio_phase_failed', 'Generation failed')
       };
       if (phase) phase.textContent = labels[request.phase] || '';
     }
@@ -555,7 +555,9 @@ export function executeMagicAction(actionType, isRegenerate = false) {
   resultBox.classList.add('is-generating');
   resultBox.setAttribute('contenteditable', 'false');
   const phase = document.getElementById('studio-generation-phase');
-  if (phase) phase.textContent = isUrl ? 'Extracting source…' : 'Generating candidates…';
+  if (phase) phase.textContent = isUrl
+    ? t('studio_phase_extracting', 'Extracting source…')
+    : t('studio_phase_generating', 'Generating candidates…');
 
   const badgesContainer = document.getElementById('generation-quality-badges');
   if (badgesContainer) {
@@ -582,8 +584,10 @@ export function executeMagicAction(actionType, isRegenerate = false) {
       loader.classList.add('hidden');
       resultBox.classList.remove('is-generating');
       resultBox.setAttribute('contenteditable', 'true');
-      if (chrome.runtime.lastError || !response || response.error) {
-        const errorMsg = chrome.runtime.lastError?.message || response?.error || response?.message;
+      const runtimeError = chrome.runtime.lastError;
+      const generationFailed = Boolean(runtimeError || !response || response.error);
+      if (generationFailed) {
+        const errorMsg = runtimeError?.message || response?.error || response?.message;
         // Chrome MV3 5-minute timeout protection: ignore if we already got streaming chunks
         if (errorMsg && errorMsg.includes("closed before a response was received") && resultBox.textContent.length > 20) {
            addLog('api_timeout_kept_chars', 'warn', [resultBox.textContent.length]);
@@ -634,7 +638,9 @@ export function executeMagicAction(actionType, isRegenerate = false) {
 
         // Auto-Persist removed per user request
       }
-      if (phase) phase.textContent = response?.error ? 'Generation failed' : 'Ready';
+      if (phase) phase.textContent = generationFailed
+        ? t('studio_phase_failed', 'Generation failed')
+        : t('studio_phase_ready', 'Ready');
       setTimeout(() => {
         resultBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 100);

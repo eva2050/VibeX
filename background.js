@@ -9,7 +9,7 @@ import { generateSingleTweetDraft, normalizeAgentMemory, mergeAgentMemory } from
 import { buildGenerationContext } from './core/generationContext.js';
 import { POST_CONTENT_MODE, POST_ORIGIN, POST_STATUS, STORAGE_SCHEMA_VERSION, migrateStoragePayload, normalizeAiMemory, normalizePostRecord } from './core/storageSchema.js';
 import { applyPerformanceReview, buildAccountPerformanceBaseline, updateAiMemoryWithReviewedPost } from './core/performanceLoop.js';
-import { DEFAULT_POST_REVIEW_DELAY_MS, buildAutoReviewSchedule, getNextAutoReviewAtAfterFailure, repairAutoReviewRecord, shouldRepairAutoReview } from './core/performanceReviewScheduler.js';
+import { DEFAULT_POST_REVIEW_DELAY_MS, buildAutoReviewSchedule, getNextAutoReviewAtAfterFailure, repairAutoReviewRecord, shouldRepairAutoReview, shouldSchedulePerformanceReview } from './core/performanceReviewScheduler.js';
 import { getLanguageInstruction, getLanguageName, getPromptText, normalizeEngineLanguage, toPreferredLanguage } from './core/i18n.js';
 import { buildInitialAutoPersona, localizeAutoPersona, resolveAutoPersonaLanguage } from './core/autoPersona.js';
 import { inferDominantAccountLanguage, normalizeDetectedAccountLanguage } from './core/accountLanguage.js';
@@ -670,14 +670,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     addLog('info', 'post_timer_triggered');
     executeNextPost();
   } else if (alarm.name === PERFORMANCE_REVIEW_ALARM) {
-    chrome.storage.local.get({ isRunning: false }, (res) => {
-      if (!res.isRunning) {
-        chrome.alarms.clear(PERFORMANCE_REVIEW_ALARM);
-        return;
-      }
-      addLog('info', 'auto_review_started');
-      reviewNextPendingPost();
-    });
+    addLog('info', 'auto_review_started');
+    reviewNextPendingPost();
   } else if (alarm.name === "autoShutdownAlarm") {
     addLog('warn', 'max_work_time_reached');
     chrome.storage.local.set({ isRunning: false });
@@ -1281,20 +1275,19 @@ async function mergeProfileScanIntoAuth(profile = {}) {
 }
 
 function schedulePerformanceReviewAlarm() {
-  chrome.storage.local.get({ draftVault: [], isRunning: false }, (res) => {
-    if (!res.isRunning) {
-      chrome.alarms.clear(PERFORMANCE_REVIEW_ALARM);
-      return;
-    }
+  chrome.storage.local.get({ draftVault: [] }, (res) => {
     const now = Date.now();
-    const nextPost = (Array.isArray(res.draftVault) ? res.draftVault : [])
-      .filter(item => item?.autoReviewEnabled && item.status !== POST_STATUS.REVIEWED && Number(item.nextAutoReviewAt) > 0)
-      .sort((a, b) => Number(a.nextAutoReviewAt) - Number(b.nextAutoReviewAt))[0];
-
-    if (!nextPost) {
+    const posts = Array.isArray(res.draftVault) ? res.draftVault : [];
+    if (!shouldSchedulePerformanceReview({ posts, now })) {
       chrome.alarms.clear(PERFORMANCE_REVIEW_ALARM);
       return;
     }
+    const nextPost = posts
+      .filter(item => item?.autoReviewEnabled
+        && !item.learningDisabled
+        && item.status !== POST_STATUS.REVIEWED
+        && Number(item.nextAutoReviewAt) > 0)
+      .sort((a, b) => Number(a.nextAutoReviewAt) - Number(b.nextAutoReviewAt))[0];
 
     chrome.alarms.create(PERFORMANCE_REVIEW_ALARM, {
       when: Math.max(now + 60 * 1000, Number(nextPost.nextAutoReviewAt))

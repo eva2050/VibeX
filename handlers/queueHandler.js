@@ -127,7 +127,14 @@ export function handleQueueMessage(request, sender, sendResponse, context) {
           .filter(item => item?.id !== interaction.id)
       ].slice(0, 300);
       const relationshipAuthors = aggregateRelationshipAuthors(relationshipInteractions);
-      const relationshipRecord = buildRelationshipVaultRecord(interaction);
+      const authorSummary = relationshipAuthors.find(item => item.authorKey === interaction.authorKey);
+      const relationshipRecord = buildRelationshipVaultRecord({
+        ...interaction,
+        metrics: {
+          ...interaction.metrics,
+          repeatInteraction: Boolean(authorSummary?.repeatInteraction)
+        }
+      });
       const draftVault = [
         relationshipRecord,
         ...(Array.isArray(res.draftVault) ? res.draftVault : [])

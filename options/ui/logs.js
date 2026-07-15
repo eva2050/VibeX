@@ -1,6 +1,6 @@
 import { getCurrentLang, translateBackendLog, t } from './i18n.js';
 import { showToast, recordFeedbackLoop } from '../options.js';
-import { POST_STATUS, normalizePostRecord, POST_ORIGIN } from '../../core/storageSchema.js';
+import { LEARNING_OBJECTIVE, POST_STATUS, normalizePostRecord, POST_ORIGIN } from '../../core/storageSchema.js';
 import { applyPerformanceReview, getBaseline, getPerformanceMetrics, inferContentFeatures, classifyRelativePerformance, updateAiMemoryWithReviewedPost } from '../../core/performanceLoop.js';
 import { renderLogEntry } from '../../core/logCatalog.js';
 
@@ -70,7 +70,14 @@ export function renderAiMemory(memory = {}, vault = []) {
   rules.slice(0, 4).forEach((rule) => {
     const item = document.createElement('div');
     item.className = 'ai-memory-item';
-    item.textContent = rule.text || String(rule);
+    const ruleState = rule?.ruleState || 'legacy';
+    const stateLabel = document.createElement('span');
+    stateLabel.className = `ai-memory-rule-state ${ruleState}`;
+    stateLabel.textContent = t(`rule_state_${ruleState}`, ruleState);
+    const ruleText = document.createElement('span');
+    ruleText.textContent = rule.text || String(rule);
+    item.appendChild(stateLabel);
+    item.appendChild(ruleText);
     list.appendChild(item);
   });
 }
@@ -182,10 +189,29 @@ export function renderVault(vault) {
     mainDiv.className = 'vault-card-main';
     mainDiv.id = `vault-card-main-${index}`;
 
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'vault-card-header';
     const titleDiv = document.createElement('div');
     titleDiv.className = 'vault-card-title';
     titleDiv.textContent = titleText;
-    mainDiv.appendChild(titleDiv);
+    headerDiv.appendChild(titleDiv);
+
+    const objectiveLabel = item.objective === LEARNING_OBJECTIVE.AUTO_RELATIONSHIP
+      ? t('objective_auto_relationship', 'Auto Relationship')
+      : item.objective === LEARNING_OBJECTIVE.AUTO_POST
+        ? t('objective_auto_post', 'Auto Post')
+        : t('objective_studio', 'Studio');
+    const statusMeta = document.createElement('div');
+    statusMeta.className = `vault-status-meta ${item.status || ''}`;
+    const metaParts = [objectiveLabel];
+    if ([LEARNING_OBJECTIVE.STUDIO_REWRITE, LEARNING_OBJECTIVE.STUDIO_REPLY].includes(item.objective)) {
+      metaParts.push(item.statusId || item.postUrl
+        ? t('attribution_attributed', 'Attributed to X post')
+        : t('attribution_unattributed', 'Not yet attributed'));
+    }
+    statusMeta.textContent = metaParts.join(' · ');
+    headerDiv.appendChild(statusMeta);
+    mainDiv.appendChild(headerDiv);
 
     const textarea = document.createElement('textarea');
     textarea.className = 'vault-card-textarea';
@@ -197,6 +223,7 @@ export function renderVault(vault) {
 
     const actualViews = Number(item.actualViews) || 0;
     const isReviewed = actualViews > 0;
+    const isRelationship = item.objective === LEARNING_OBJECTIVE.AUTO_RELATIONSHIP;
 
     const performanceDiv = document.createElement('div');
     performanceDiv.className = 'vault-performance';
@@ -207,6 +234,29 @@ export function renderVault(vault) {
     const metricsDiv = document.createElement('div');
     metricsDiv.className = 'vault-performance-metrics';
 
+    if (isRelationship) {
+      const relationshipDiv = document.createElement('div');
+      relationshipDiv.className = 'vault-performance-metric';
+      const relationshipLabel = document.createElement('span');
+      relationshipLabel.textContent = t('objective_auto_relationship', 'Auto Relationship');
+      const relationshipValue = document.createElement('strong');
+      relationshipValue.textContent = t('relationship_outbound_completed', 'Reply completed');
+      relationshipDiv.appendChild(relationshipLabel);
+      relationshipDiv.appendChild(relationshipValue);
+      metricsDiv.appendChild(relationshipDiv);
+
+      if (item.relationshipMetrics?.repeatInteraction) {
+        const repeatDiv = document.createElement('div');
+        repeatDiv.className = 'vault-performance-metric';
+        const repeatLabel = document.createElement('span');
+        repeatLabel.textContent = t('relationship_repeat', 'Repeat interaction');
+        const repeatValue = document.createElement('strong');
+        repeatValue.textContent = item.authorName || item.author || '-';
+        repeatDiv.appendChild(repeatLabel);
+        repeatDiv.appendChild(repeatValue);
+        metricsDiv.appendChild(repeatDiv);
+      }
+    } else {
     const actualDiv = document.createElement('div');
     actualDiv.className = 'vault-performance-metric vault-performance-actual';
     const actualLabel = document.createElement('span');
@@ -270,27 +320,30 @@ export function renderVault(vault) {
       badgeDiv.appendChild(badge);
       metricsDiv.appendChild(badgeDiv);
     }
+    }
 
     performanceTop.appendChild(metricsDiv);
     performanceDiv.appendChild(performanceTop);
 
-    const controls = document.createElement('div');
-    controls.className = 'vault-performance-controls';
-    if (isReviewed) controls.classList.add('is-hidden');
+    if (!isRelationship) {
+      const controls = document.createElement('div');
+      controls.className = 'vault-performance-controls';
+      if (isReviewed) controls.classList.add('is-hidden');
 
-    const viewsInput = document.createElement('input');
-    viewsInput.className = 'vault-performance-input vault-performance-views';
-    viewsInput.placeholder = 'Actual views';
-    viewsInput.value = actualViews > 0 ? String(actualViews) : '';
-    viewsInput.dataset.index = index;
-    controls.appendChild(viewsInput);
+      const viewsInput = document.createElement('input');
+      viewsInput.className = 'vault-performance-input vault-performance-views';
+      viewsInput.placeholder = 'Actual views';
+      viewsInput.value = actualViews > 0 ? String(actualViews) : '';
+      viewsInput.dataset.index = index;
+      controls.appendChild(viewsInput);
 
-    const savePerfBtn = document.createElement('button');
-    savePerfBtn.className = 'vault-performance-save-btn';
-    savePerfBtn.dataset.index = index;
-    savePerfBtn.textContent = 'Save';
-    controls.appendChild(savePerfBtn);
-    performanceDiv.appendChild(controls);
+      const savePerfBtn = document.createElement('button');
+      savePerfBtn.className = 'vault-performance-save-btn';
+      savePerfBtn.dataset.index = index;
+      savePerfBtn.textContent = 'Save';
+      controls.appendChild(savePerfBtn);
+      performanceDiv.appendChild(controls);
+    }
 
     if (item.aiLearning) {
       const learning = document.createElement('div');

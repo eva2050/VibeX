@@ -3,6 +3,7 @@ import {
   buildAutoReviewSchedule,
   getNextAutoReviewAtAfterFailure,
   repairAutoReviewRecord,
+  shouldSchedulePerformanceReview,
   shouldRepairAutoReview
 } from './core/performanceReviewScheduler.js';
 import { POST_STATUS } from './core/storageSchema.js';
@@ -68,5 +69,16 @@ const repaired = repairAutoReviewRecord(stuckPending, {
 assert.equal(repaired.autoReviewEnabled, true);
 assert.equal(repaired.nextAutoReviewAt, publishedAt + 72 * hour + 2 * 60 * 1000);
 assert.equal(repaired.autoReviewSchedule.length, 3);
+
+assert.equal(shouldSchedulePerformanceReview({
+  isRunning: false,
+  posts: [{
+    id: 'tracked',
+    status: POST_STATUS.PUBLISHED,
+    autoReviewEnabled: true,
+    nextAutoReviewAt: 100
+  }],
+  now: 50
+}), true);
 
 console.log('performance review scheduler checks passed');

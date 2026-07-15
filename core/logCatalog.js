@@ -664,6 +664,13 @@ const LOG_MESSAGES = {
     es: 'La revisión de calidad de Studio detectó posibles problemas: {0}',
     id: 'Pemeriksaan kualitas Studio mendeteksi potensi masalah: {0}'
   },
+  studio_generation_phase: {
+    zh: 'Studio 生成 {0}：{1}',
+    en: 'Studio generation {0}: {1}',
+    ja: 'Studio 生成 {0}：{1}',
+    es: 'Generación de Studio {0}: {1}',
+    id: 'Pembuatan Studio {0}: {1}'
+  },
   datahub_complex_route: {
     zh: '检测到复杂/音视频链接，提交 DataHub 异步提取任务...',
     en: 'Complex/media link detected. Submitting async DataHub extraction task...'

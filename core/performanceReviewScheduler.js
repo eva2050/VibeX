@@ -39,6 +39,13 @@ function hasPerformanceReview(item = {}) {
     || Boolean(item.reviewedAt);
 }
 
+function shouldSchedulePerformanceReview({ posts = [] } = {}) {
+  return (Array.isArray(posts) ? posts : []).some(item => item?.autoReviewEnabled
+    && !item.learningDisabled
+    && item.status !== 'reviewed'
+    && Number(item.nextAutoReviewAt) > 0);
+}
+
 function shouldRepairAutoReview(item = {}, options = {}) {
   if (!item || item.status === 'reviewed' || hasPerformanceReview(item)) return false;
   const now = toTimestamp(options.now);
@@ -75,5 +82,6 @@ export {
   getNextAutoReviewAtAfterFailure,
   hasPerformanceReview,
   repairAutoReviewRecord,
+  shouldSchedulePerformanceReview,
   shouldRepairAutoReview
 };
