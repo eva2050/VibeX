@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const html = readFileSync(new URL('./options/chinese-post-benchmark.html', import.meta.url), 'utf8');
+for (const id of ['benchmark-start', 'benchmark-progress', 'benchmark-review-list', 'benchmark-feedback', 'benchmark-submit-review']) assert.match(html, new RegExp(`id="${id}"`));
+const optionsHtml = readFileSync(new URL('./options/options.html', import.meta.url), 'utf8');
+assert.doesNotMatch(optionsHtml, /chinese-post-benchmark/);
+const js = readFileSync(new URL('./options/chinese-post-benchmark.js', import.meta.url), 'utf8');
+assert.match(js, /runNextChinesePostBenchmarkStep/);
+assert.match(js, /submitChinesePostBenchmarkReview/);
+console.log('Chinese post benchmark UI checks passed');
