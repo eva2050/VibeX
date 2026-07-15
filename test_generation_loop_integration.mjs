@@ -43,6 +43,11 @@ const html = readFileSync(new URL('./options/options.html', import.meta.url), 'u
 assert.match(html, /id="generation-result"[^>]+contenteditable="true"/);
 const background = readFileSync(new URL('./background.js', import.meta.url), 'utf8');
 assert.match(background, /shouldSchedulePerformanceReview\(\{ posts, now \}\)/);
+const router = readFileSync(new URL('./handlers/messageRouter.js', import.meta.url), 'utf8');
+assert.match(router, /startChinesePostBenchmark/);
+assert.match(router, /submitChinesePostBenchmarkReview/);
+const benchmarkHtml = readFileSync(new URL('./options/chinese-post-benchmark.html', import.meta.url), 'utf8');
+assert.match(benchmarkHtml, /本轮 10 条内容/);
 assert.doesNotMatch(
   background,
   /alarm\.name === PERFORMANCE_REVIEW_ALARM[\s\S]{0,240}!res\.isRunning/
