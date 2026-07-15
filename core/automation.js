@@ -10,6 +10,8 @@ import { getBannedClichePhrasesRule } from './contentRules.js';
 import { inferContentFeatures } from './performanceLoop.js';
 import { POST_CONTENT_MODE } from './storageSchema.js';
 import { buildStudioQualityGateRules, buildStudioTimeContext } from './studioPrompt.js';
+import { resolveContentSkill } from './contentSkills/registry.js';
+import './contentSkills/zh/postSkill.js';
 
 
 
@@ -82,8 +84,8 @@ function buildUniquenessConstraint(draftVault) {
 ${lines.join('\n')}`;
 }
 
-async function reviewGeneratedTweetQuality(text, config, persona = {}) {
-  const reviewPrompt = buildAutoQualityReviewPrompt(text, persona);
+async function reviewGeneratedTweetQuality(text, config, persona = {}, contentSkillContext = null) {
+  const reviewPrompt = buildAutoQualityReviewPrompt(text, persona, contentSkillContext);
 
   try {
     const raw = await callLLM(reviewPrompt, config, true);
@@ -100,8 +102,10 @@ async function reviewGeneratedTweetQuality(text, config, persona = {}) {
   }
 }
 
-function buildAutoQualityReviewPrompt(text = '', persona = {}) {
+function buildAutoQualityReviewPrompt(text = '', persona = {}, contentSkillContext = null) {
   return `你是一名严格、独立的 X 内容质量复核员，不是这条推文的作者。请你不要顾及情面，客观判断下面这条候选推文是否真的够格发布。
+
+${contentSkillContext?.reviewInstruction || ''}
 
 账号定位：${persona.characteristics || '未填写'}
 目标用户：${persona.targetUsers || '未填写'}
@@ -123,6 +127,38 @@ ${text}
 {"approved": true 或 false, "reason": "如果不通过，用一句话说明最主要的问题；如果通过，留空字符串"}`;
 }
 
+function buildAutoPostSkillContext({ contentSkill = null, sourceText = '' } = {}) {
+  if (!contentSkill) return { prompt: '', reviewInstruction: '', diagnosis: null };
+  const diagnosis = contentSkill.analyze({ text: sourceText });
+  const strategies = contentSkill.selectCandidateStrategies(diagnosis);
+  const strategyInstructions = strategies.map(strategy => (
+    contentSkill.buildCandidateInstruction(strategy, diagnosis)
+  ));
+  const reviewInstruction = contentSkill.buildJudgeInstruction(diagnosis);
+  return {
+    diagnosis,
+    reviewInstruction,
+    prompt: [
+      `[Content Skill: ${contentSkill.id}@${contentSkill.version}]`,
+      '【中文 X 内容诊断】',
+      `内容类型：${diagnosis.family}; 确定性：${diagnosis.certainty}; 可用实体：${diagnosis.entities.join('、') || '无'}; 可用数字：${diagnosis.numbers.join('、') || '无'}`,
+      'Skill 是不可被历史低表现样本覆盖的质量基线。账号画像、用户偏好和 Loop 只能在这套基线上做个性化，不得降低事实忠实度、自然度或信息增量标准。',
+      ...strategyInstructions,
+      reviewInstruction
+    ].join('\n\n')
+  };
+}
+
+function buildAutoPostSkillMetadata(contentSkill = null, text = '') {
+  if (!contentSkill) return {};
+  const diagnosis = contentSkill.analyze({ text });
+  return {
+    contentSkillId: contentSkill.id,
+    contentSkillVersion: contentSkill.version,
+    contentFamily: diagnosis.family
+  };
+}
+
 function buildAutoPostPrompt({
   config = {},
   generationContext = {},
@@ -136,7 +172,8 @@ function buildAutoPostPrompt({
   langConstraint = '',
   uniquenessConstraint = '',
   randomSeed = '',
-  outputLangInstruction = ''
+  outputLangInstruction = '',
+  contentSkillContext = ''
 } = {}) {
   return `你是这个账号的 X 内容操盘手，目标是写出极度符合账号“活人感、具体观察、轻判断、自然短文”定位的原生推文。
 你要像赛道里的真人内容创作者，绝对不能像公众号编辑、品牌公关或普通 AI 助手。
@@ -149,6 +186,8 @@ ${config.accountBio || '暂无'}
 - 目标用户：${persona.targetUsers || '未填写'}
 - 账号定位：${persona.characteristics || '未填写'}
 - 发推策略：${persona.goals || '未填写'}
+
+${contentSkillContext}
 
 【核心基准：优质推文样本 (Golden Cases)】：
 发推策略与调性必须由以下样本决定。你必须且只能模仿这些样本的文风。
@@ -250,7 +289,7 @@ async function generateSingleTweetDraft() {
       'apiKey', 'apiProvider', 'aiModel', 'isRunning',
       'isGenerating', 'engineLanguage', 'accountLanguage', 'accountBio', 'agentMemory', 'competitorReport', 'onboardingStrategy', 'leadTarget',
       'aiPersona', 'styleTrainingData', 'aiMemory', 'accountPerformanceBaseline', 'feedbackLoopData', 'feedbackLikes', 'feedbackDislikes',
-      'draftVault'
+      'draftVault', 'contentSkillRollout'
     ], async (config) => {
       config.engineLanguage = normalizeEngineLanguage(
         (config.engineLanguage || 'auto') === 'auto' && config.accountLanguage ? config.accountLanguage : config.engineLanguage || 'auto',
@@ -283,6 +322,20 @@ async function generateSingleTweetDraft() {
     const randomSeed = `\n[System Random Batch Seed: ${Date.now()}-${Math.random().toString(36).substring(2)}]`;
 
     const outputLangInstruction = getLanguageName(config.engineLanguage, globalThis.navigator?.language || '');
+    const contentSkill = config.contentSkillRollout?.zhPost === true
+      ? resolveContentSkill({
+        language: config.engineLanguage,
+        format: 'post',
+        objective: 'auto_post'
+      })
+      : null;
+    const contentSkillSource = [
+      config.accountBio,
+      persona.characteristics,
+      persona.goals,
+      generationContext.agentMemoryPrompt
+    ].filter(Boolean).join('\n');
+    const contentSkillContext = buildAutoPostSkillContext({ contentSkill, sourceText: contentSkillSource });
 
     const prompt = buildAutoPostPrompt({
       config,
@@ -297,7 +350,8 @@ async function generateSingleTweetDraft() {
       langConstraint,
       uniquenessConstraint,
       randomSeed,
-      outputLangInstruction
+      outputLangInstruction,
+      contentSkillContext: contentSkillContext.prompt
     });
 
     let lastFeedback = '';
@@ -328,12 +382,29 @@ async function generateSingleTweetDraft() {
         }
 
         if (!topCandidate.qualityIssue) {
+          if (contentSkill) {
+            const candidateDiagnosis = contentSkill.analyze({ text: topCandidate.text });
+            const skillQuality = contentSkill.evaluateDeterministically(
+              topCandidate.text,
+              topCandidate.text,
+              candidateDiagnosis
+            );
+            if (!skillQuality.approved) {
+              lastFeedback = `中文 Post Skill 硬门控未通过：${skillQuality.issues.join(', ')}`;
+              continue;
+            }
+          }
           // Passed deterministic checks. Get an independent LLM review before
           // trusting the model's own self-assigned scores.
-          const review = await reviewGeneratedTweetQuality(topCandidate.text, config, persona);
+          const candidateSkillContext = contentSkill
+            ? buildAutoPostSkillContext({ contentSkill, sourceText: topCandidate.text })
+            : null;
+          const review = await reviewGeneratedTweetQuality(topCandidate.text, config, persona, candidateSkillContext);
           if (review.approved) {
             chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
-            return resolve(topCandidate.text);
+            return resolve(contentSkill
+              ? { text: topCandidate.text, ...buildAutoPostSkillMetadata(contentSkill, topCandidate.text) }
+              : topCandidate.text);
           } else {
             lastFeedback = review.reason || '独立复核认为该草稿信息增量不足或存在套话/模板腔，未通过质量把关。';
           }
@@ -371,6 +442,8 @@ export {
   FORBIDDEN_CLAIM_PATTERNS,
   buildUniquenessConstraint,
   buildAutoPostPrompt,
+  buildAutoPostSkillContext,
+  buildAutoPostSkillMetadata,
   buildAutoQualityReviewPrompt,
   reviewGeneratedTweetQuality
 };

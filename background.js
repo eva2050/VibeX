@@ -740,7 +740,8 @@ async function executeNextPost() {
 
   try {
     await setStorage({ isGenerating: true });
-    const postText = await generateSingleTweetDraft();
+    const generatedDraft = await generateSingleTweetDraft();
+    const postText = typeof generatedDraft === 'string' ? generatedDraft : generatedDraft?.text;
     const formattedText = formatTweetForX(postText);
     
     if (!formattedText) {
@@ -754,6 +755,11 @@ async function executeNextPost() {
       pendingPost: formattedText,
       pendingPostId: Date.now() + Math.random(),
       pendingPostSource: 'instant_gen',
+      pendingPostMetadata: typeof generatedDraft === 'object' ? {
+        contentSkillId: generatedDraft.contentSkillId || '',
+        contentSkillVersion: generatedDraft.contentSkillVersion || '',
+        contentFamily: generatedDraft.contentFamily || ''
+      } : null,
       isGenerating: false
     });
     
@@ -806,7 +812,7 @@ function triggerPostInTab() {
   });
 }
 
-function upsertAutoPostToVault({ id, text, source, publishedAt, postUrl, statusId }) {
+function upsertAutoPostToVault({ id, text, source, publishedAt, postUrl, statusId, metadata = {} }) {
   const normalizedText = formatTweetForX(text || '');
   if (!normalizedText) return Promise.resolve(false);
 
@@ -840,7 +846,10 @@ function upsertAutoPostToVault({ id, text, source, publishedAt, postUrl, statusI
         autoReviewAttempts: existing?.autoReviewAttempts || 0,
         autoReviewSchedule: existing?.autoReviewSchedule || reviewSchedule,
         nextAutoReviewAt: existing?.nextAutoReviewAt || reviewSchedule[0],
-        lastAutoReviewError: existing?.lastAutoReviewError || ''
+        lastAutoReviewError: existing?.lastAutoReviewError || '',
+        contentSkillId: existing?.contentSkillId || metadata.contentSkillId || '',
+        contentSkillVersion: existing?.contentSkillVersion || metadata.contentSkillVersion || '',
+        contentFamily: existing?.contentFamily || metadata.contentFamily || ''
       });
 
       if (existingIndex >= 0) {
@@ -2033,11 +2042,12 @@ async function reviewNextPendingPost(options = {}) {
 
 function handlePostCompleted(source, meta = {}) {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['postsToday', 'lastPostDate', 'sessionPostCount', 'pendingPost', 'pendingPostId', 'pendingPostSource'], (result) => {
+    chrome.storage.local.get(['postsToday', 'lastPostDate', 'sessionPostCount', 'pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingPostMetadata'], (result) => {
       const updates = {
         pendingPost: null,
         pendingPostId: null,
         pendingPostSource: null,
+        pendingPostMetadata: null,
         pendingScheduledAt: null,
         isPosting: false,
         isPostingStartedAt: 0,
@@ -2054,7 +2064,7 @@ function handlePostCompleted(source, meta = {}) {
       const finalize = (afterPersist) => {
         chrome.storage.local.set(updates, () => {
           const cleanup = () => {
-            chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt'], finish);
+            chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingPostMetadata', 'pendingScheduledAt'], finish);
           };
           if (afterPersist) {
             afterPersist().finally(cleanup);
@@ -2070,7 +2080,8 @@ function handlePostCompleted(source, meta = {}) {
         source: result.pendingPostSource || source,
         postUrl: meta.postUrl || '',
         statusId: meta.statusId || '',
-        publishedAt: Date.now()
+        publishedAt: Date.now(),
+        metadata: result.pendingPostMetadata || {}
       });
       const shouldPersistAutoPost = source === 'instant_gen' || result.pendingPostSource === 'instant_gen';
 
@@ -3012,7 +3023,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
        chrome.alarms.clear("postTweetAlarm");
        chrome.alarms.clear("autoShutdownAlarm");
        chrome.storage.local.set({ isPosting: false, isPostingStartedAt: 0 });
-       chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
+       chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingPostMetadata', 'pendingScheduledAt']);
        chrome.power.releaseKeepAwake();
     }
     if (changes.isAutoPaused && changes.isAutoPaused.newValue !== changes.isAutoPaused.oldValue) {

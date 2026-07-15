@@ -55,7 +55,7 @@ function extractEntities(text = '') {
 }
 
 function inferContentFamily(text = '') {
-  if (/Build\s*in\s*public|第\s*\d+\s*天|开发进度|本周进展|今天.{0,20}(?:上线|发布|新增|删掉|删除|修复|修了)/i.test(text)) {
+  if (/Build\s*in\s*public|第\s*\d+\s*天|开发进度|本周进展|(?:今天|这周|本周).{0,20}(?:上线|发布|新增|删掉|删除|修复|修了)/i.test(text)) {
     return 'build_in_public';
   }
   if (STEP_PATTERN.test(text) || /方法|框架|流程.{0,10}(?:简单|分为|：)|工作流.{0,10}(?:简单|：)|先.{0,25}再|只问(?:两|三|四|\d+)个问题|验证.{0,8}(?:只看|分为)/.test(text)) {
