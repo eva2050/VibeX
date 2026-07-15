@@ -35,6 +35,15 @@ const STRATEGIES = Object.freeze({
   })
 });
 
+const FAMILY_RECIPES = Object.freeze({
+  product_observation: '先写素材里的产品行为、使用断点或具体动作，再写它让你看到的问题；不要先宣布一个普遍道理。',
+  tool_experience: '按“我做了什么—遇到什么—为什么留下或放弃”展开，只复用素材已经给出的体验。',
+  build_in_public: '先交代这次具体改了什么和结果，再写这次取舍带来的判断；允许粗糙，不包装成成功学。',
+  failure_retrospective: '先写发生了什么、哪里判断错了、造成什么结果，再写现在如何理解；不把一次经历升级成人人适用的定律。',
+  industry_opinion: '先放出素材里的变化、约束或现象，再给带有边界的个人判断；保留“可能、未必、我觉得”等不确定性。',
+  workflow_framework: '保留素材原有步骤和顺序，用“我怎么做”或直接动作说明，不增加步骤，也不承诺结果。'
+});
+
 const TERRITORY_PATTERN = /AI|人工智能|模型|智能体|agent|产品|工具|软件|SaaS|独立开发|开发者|创业|创作者|内容|工作流|workflow|用户|留存|增长|变现|商业化|交付|发布|上线|代码助手|知识库|Build\s*in\s*public/i;
 const UNCERTAINTY_PATTERN = /怀疑|可能|也许|或许|大概|似乎|看起来|未必|不一定|越来越觉得|我觉得|我猜|恐怕|倾向于|是否|会不会/;
 const EXPERIENCE_PATTERN = /(?:我|我们).{0,10}(?:试了|试过|用了|用过|连续做|做了|上线了|发布了|删掉|删除|改了|踩过|花了|换了|留下来|复盘了)/;
@@ -94,10 +103,14 @@ function diagnoseChinesePostInput(input = {}) {
     ...(!hasCompetitionRelation ? ['competition_bet'] : [])
   ];
   const recommendedStructures = family === 'workflow_framework'
-    ? ['faithful_sharpening', 'structured_framework', 'concrete_scene']
+    ? ['structured_framework']
     : family === 'build_in_public'
-      ? ['faithful_sharpening', 'progress_log', 'cognitive_reframe']
-      : ['faithful_sharpening', 'cognitive_reframe', 'concrete_scene'];
+      ? ['progress_log']
+      : ['tool_experience', 'failure_retrospective'].includes(family)
+        ? ['concrete_scene']
+        : family === 'industry_opinion'
+          ? ['cognitive_reframe']
+          : ['faithful_sharpening'];
   return Object.freeze({
     supported,
     family,
@@ -123,14 +136,8 @@ function selectChinesePostStrategies(diagnosis = {}) {
   const ids = Array.isArray(diagnosis.recommendedStructures)
     ? diagnosis.recommendedStructures
     : [];
-  const unique = [...new Set(ids)]
-    .filter(id => STRATEGIES[id])
-    .slice(0, 3);
-  const fallback = ['faithful_sharpening', 'cognitive_reframe', 'concrete_scene'];
-  fallback.forEach((id) => {
-    if (unique.length < 3 && !unique.includes(id)) unique.push(id);
-  });
-  return unique.slice(0, 3).map(id => STRATEGIES[id]);
+  const selectedId = [...new Set(ids)].find(id => STRATEGIES[id]) || 'faithful_sharpening';
+  return [STRATEGIES[selectedId]];
 }
 
 function buildChineseCandidateInstruction(strategy = {}, diagnosis = {}) {
@@ -144,17 +151,23 @@ function buildChineseCandidateInstruction(strategy = {}, diagnosis = {}) {
     `[中文 X Skill：${strategy.label || strategy.id || '候选策略'}]`,
     strategy.instruction || '',
     `内容类型：${diagnosis.family || 'unknown'}`,
+    `成稿结构：${FAMILY_RECIPES[diagnosis.family] || FAMILY_RECIPES.product_observation}`,
+    '先写素材里已经出现的具体信号：数字、人物、动作、产品行为、对话或过程。具体信号至少出现一个，然后再写判断。',
+    '如果素材只有一个薄观点，就忠实写短，不要用空泛金句把它伪装成深度。',
+    '素材提供第一人称时，写自己如何观察和行动，不要站在高处教别人怎么做；素材没有第一人称时，不得伪造。',
     certaintyRule,
     experienceRule,
     diagnosis.forbiddenStructures?.includes('competition_bet')
       ? '原素材没有牌局、竞争或资源分配关系，不得使用“押、赌、下半场、谁赢了”等结构。'
       : '',
-    '像中文 X 用户自然表达，不写营销号总结，不使用翻译腔，不解释写作过程。'
+    '像中文 X 用户自然说话。可以口语化、可以有不完美的停顿，但每一段都必须增加新信息。',
+    '只返回一篇可以直接发布的正文，不给候选、不解释写作过程。'
   ].filter(Boolean).join('\n');
 }
 
 export {
   STRATEGIES,
+  FAMILY_RECIPES,
   SUPPORTED_CHINESE_POST_FAMILIES,
   buildChineseCandidateInstruction,
   diagnoseChinesePostInput,

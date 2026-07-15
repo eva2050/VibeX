@@ -1,11 +1,19 @@
+const CONTENT_SKILL_ROLLOUT_SCHEMA_VERSION = 2;
+
 function normalizeContentSkillRollout(value = {}) {
-  const hasSplitSchema = Object.hasOwn(value || {}, 'zhPostStudio')
-    || Object.hasOwn(value || {}, 'zhPostAuto');
-  if (!hasSplitSchema) return { zhPostStudio: false, zhPostAuto: false };
+  const isCurrentSchema = Number(value?.schemaVersion) === CONTENT_SKILL_ROLLOUT_SCHEMA_VERSION;
+  if (!isCurrentSchema) {
+    return {
+      schemaVersion: CONTENT_SKILL_ROLLOUT_SCHEMA_VERSION,
+      zhPostStudio: true,
+      zhPostAuto: false
+    };
+  }
   return {
-    zhPostStudio: value.zhPostStudio === true,
+    schemaVersion: CONTENT_SKILL_ROLLOUT_SCHEMA_VERSION,
+    zhPostStudio: value.zhPostStudio !== false,
     zhPostAuto: value.zhPostAuto === true
   };
 }
 
-export { normalizeContentSkillRollout };
+export { CONTENT_SKILL_ROLLOUT_SCHEMA_VERSION, normalizeContentSkillRollout };

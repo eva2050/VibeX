@@ -16,54 +16,32 @@ function queuedModel(outputs) {
 }
 
 const normalModel = queuedModel([
-  'Weak generic output.',
   'The demo is not the product. The workflow people repeat is.',
-  'A product becomes real when people repeat the boring workflow.',
   JSON.stringify({
-    selectedCandidateId: 'candidate-b',
+    selectedCandidateId: 'candidate-a',
     scores: [
-      { id: 'candidate-a', total: 55, hardFailures: ['no_concrete_signal'] },
-      { id: 'candidate-b', total: 90, hardFailures: [] },
-      { id: 'candidate-c', total: 84, hardFailures: [] }
+      { id: 'candidate-a', total: 90, hardFailures: [] }
     ],
-    rationale: 'Candidate B preserves the source claim and adds a concrete contrast.'
+    rationale: 'The draft preserves the source claim and adds a concrete contrast.'
   })
 ]);
+const normalPhases = [];
 const normal = await orchestrateStudioGeneration({
   promptType: 'viral_rewrite',
   sourceText: 'Demos do not matter if nobody repeats the workflow.',
   engineLanguage: 'en',
   generationContext: {}
-}, normalModel);
-assert.equal(normalModel.calls.length, 4);
-assert.equal(normal.selectedCandidateId, 'candidate-b');
+}, { ...normalModel, onPhase: phase => normalPhases.push(phase) });
+assert.equal(normalModel.calls.length, 2);
+assert.equal(normal.selectedCandidateId, 'candidate-a');
 assert.equal(normal.text, 'The demo is not the product. The workflow people repeat is.');
+assert.equal(normal.candidates.length, 1);
 assert.equal(normal.quality.approved, true);
 assert.equal(normal.repaired, false);
-
-const partialModel = queuedModel([
-  new Error('provider timeout'),
-  'The workflow matters when a user repeats it next week.',
-  'A repeatable workflow is stronger evidence than a polished demo.',
-  JSON.stringify({
-    selectedCandidateId: 'candidate-b',
-    scores: [{ id: 'candidate-b', total: 88, hardFailures: [] }],
-    rationale: 'Specific and faithful.'
-  })
-]);
-const partial = await orchestrateStudioGeneration({
-  promptType: 'viral_rewrite',
-  sourceText: 'A repeated workflow matters more than a demo.',
-  engineLanguage: 'en',
-  generationContext: {}
-}, partialModel);
-assert.equal(partialModel.calls.length, 4);
-assert.equal(partial.selectedCandidateId, 'candidate-b');
-assert.match(partial.text, /next week/);
+assert.deepEqual(normalPhases, ['generating_draft', 'reviewing_draft']);
 
 const repairModel = queuedModel([
   'I agree with the original post.',
-  'Interesting point about the workflow.',
   JSON.stringify({
     selectedCandidateId: 'candidate-a',
     scores: [{ id: 'candidate-a', total: 70, hardFailures: [] }],
@@ -71,21 +49,21 @@ const repairModel = queuedModel([
   }),
   'The workflow test is simple: does the same user come back next week without a reminder?'
 ]);
+const repairPhases = [];
 const repaired = await orchestrateStudioGeneration({
   promptType: 'draft_reply',
   sourceText: 'A product is a workflow users repeat.',
   engineLanguage: 'en',
   generationContext: {}
-}, repairModel);
-assert.equal(repairModel.calls.length, 4);
+}, { ...repairModel, onPhase: phase => repairPhases.push(phase) });
+assert.equal(repairModel.calls.length, 3);
 assert.equal(repaired.repaired, true);
 assert.match(repaired.text, /come back next week/);
 assert.equal(repaired.quality.approved, true);
+assert.deepEqual(repairPhases, ['generating_draft', 'reviewing_draft', 'repairing_draft']);
 
 const failedModel = queuedModel([
-  new Error('candidate A failed'),
-  new Error('candidate B failed'),
-  new Error('candidate C failed')
+  new Error('draft failed')
 ]);
 await assert.rejects(
   () => orchestrateStudioGeneration({
@@ -94,13 +72,11 @@ await assert.rejects(
     engineLanguage: 'en',
     generationContext: {}
   }, failedModel),
-  /All Studio candidate calls failed/
+  /Studio draft call failed/
 );
 
 const invalidJudgeModel = queuedModel([
   'A concrete workflow observation.',
-  'Another concrete workflow observation.',
-  'The workflow is useful when repeated.',
   'not-json'
 ]);
 await assert.rejects(

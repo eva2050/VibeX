@@ -17,8 +17,8 @@ import { shouldSchedulePerformanceReview } from './core/performanceReviewSchedul
 import { buildRelationshipInteraction } from './core/relationshipLoop.js';
 import { buildChinesePostReleaseReport } from './scripts/run_chinese_post_benchmark.mjs';
 
-assert.equal(REWRITE_CANDIDATE_BRIEFS.length, 3);
-assert.equal(REPLY_CANDIDATE_BRIEFS.length, 2);
+assert.equal(REWRITE_CANDIDATE_BRIEFS.length, 1);
+assert.equal(REPLY_CANDIDATE_BRIEFS.length, 1);
 assert.equal(STUDIO_PASS_SCORE, 82);
 assert.equal(MIN_CANDIDATE_SAMPLES, 5);
 assert.equal(MIN_ACTIVE_SAMPLES, 8);
@@ -44,10 +44,7 @@ assert.match(html, /id="generation-result"[^>]+contenteditable="true"/);
 const background = readFileSync(new URL('./background.js', import.meta.url), 'utf8');
 assert.match(background, /shouldSchedulePerformanceReview\(\{ posts, now \}\)/);
 const router = readFileSync(new URL('./handlers/messageRouter.js', import.meta.url), 'utf8');
-assert.match(router, /startChinesePostBenchmark/);
-assert.match(router, /submitChinesePostBenchmarkReview/);
-const benchmarkHtml = readFileSync(new URL('./options/chinese-post-benchmark.html', import.meta.url), 'utf8');
-assert.match(benchmarkHtml, /本轮 10 条内容/);
+assert.doesNotMatch(router, /ChinesePostBenchmark|handleBenchmarkMessage/);
 assert.doesNotMatch(
   background,
   /alarm\.name === PERFORMANCE_REVIEW_ALARM[\s\S]{0,240}!res\.isRunning/
@@ -62,7 +59,7 @@ const skillReport = buildChinesePostReleaseReport({
   generatedAt: '2026-07-15T00:00:00.000Z'
 });
 assert.equal(skillReport.skillId, 'zh-x-post');
-assert.equal(skillReport.skillVersion, '1.0.0');
+assert.equal(skillReport.skillVersion, '1.1.0');
 assert.equal(typeof skillReport.releaseGate.deterministicPassed, 'boolean');
 assert.ok(['passed', 'failed', 'credentials_required'].includes(skillReport.liveBlindComparison.status));
 assert.equal(skillReport.liveBlindComparison.winRate ?? null, null);

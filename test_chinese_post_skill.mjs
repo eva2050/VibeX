@@ -32,12 +32,9 @@ assert.equal(uncertain.forbiddenStructures.includes('certainty_escalation'), tru
 assert.equal(uncertain.forbiddenStructures.includes('competition_bet'), true);
 
 const strategies = ZH_POST_SKILL.selectCandidateStrategies(uncertain);
-assert.equal(strategies.length, 3);
-assert.equal(new Set(strategies.map(item => item.id)).size, 3);
+assert.equal(strategies.length, 1);
 assert.deepEqual(strategies.map(item => item.id), [
-  'faithful_sharpening',
-  'cognitive_reframe',
-  'concrete_scene'
+  'faithful_sharpening'
 ]);
 
 const framework = ZH_POST_SKILL.analyze({ text: familyCases[5][1] });
@@ -53,10 +50,15 @@ assert.equal(outside.fallbackReason, 'outside_supported_territory');
 const candidateInstruction = ZH_POST_SKILL.buildCandidateInstruction(strategies[0], uncertain);
 assert.match(candidateInstruction, /忠实强化/);
 assert.match(candidateInstruction, /不得把怀疑或可能改成确定事实/);
+assert.match(candidateInstruction, /先写素材里已经出现的具体信号/);
+assert.match(candidateInstruction, /写自己如何观察和行动，不要站在高处教别人/);
+assert.match(candidateInstruction, /不得伪造/);
 const judgeInstruction = ZH_POST_SKILL.buildJudgeInstruction(uncertain);
 assert.match(judgeInstruction, /自然中文 X 表达/);
 assert.match(judgeInstruction, /硬失败/);
 assert.match(judgeInstruction, /fidelity/);
+assert.match(judgeInstruction, /先看具体证据/);
+assert.match(judgeInstruction, /说教/);
 const repairInstruction = ZH_POST_SKILL.buildRepairInstruction(uncertain, ['certainty_escalation']);
 assert.match(repairInstruction, /certainty_escalation/);
 assert.match(repairInstruction, /只修复失败项/);
@@ -89,5 +91,22 @@ const templateOutput = ZH_POST_SKILL.evaluateDeterministically(
   uncertain
 );
 assert.equal(templateOutput.issues.includes('template_tone'), true);
+
+const lectureOutput = ZH_POST_SKILL.evaluateDeterministically(
+  familyCases[0][1],
+  '真正重要的是：功能决定第一次体验，上下文决定会不会有第二次。',
+  ZH_POST_SKILL.analyze({ text: familyCases[0][1] })
+);
+assert.equal(lectureOutput.issues.includes('lecture_tone'), true);
+assert.equal(lectureOutput.approved, false);
+
+const evidenceFirstOutput = ZH_POST_SKILL.evaluateDeterministically(
+  familyCases[0][1],
+  '第一次打开很惊艳，第二次使用却要重新解释背景。上下文接不上，功能再多，也很难让人愿意回来。',
+  ZH_POST_SKILL.analyze({ text: familyCases[0][1] })
+);
+assert.equal(evidenceFirstOutput.approved, true);
+
+assert.equal(ZH_POST_SKILL.version, '1.1.0');
 
 console.log('Chinese post skill checks passed');

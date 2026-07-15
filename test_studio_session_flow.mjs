@@ -51,11 +51,11 @@ assert.match(handlerSource, /generationSessions/);
 
 const html = readFileSync(new URL('./options/options.html', import.meta.url), 'utf8');
 assert.match(html, /id="generation-result"[^>]+contenteditable="true"/);
-assert.match(html, /id="generation-candidates"/);
+assert.doesNotMatch(html, /id="generation-candidates"/);
 
 const optionsSource = readFileSync(new URL('./options/options.js', import.meta.url), 'utf8');
 assert.match(optionsSource, /currentGenerationSession/);
 assert.match(optionsSource, /persistCurrentGenerationText/);
-assert.match(optionsSource, /renderGenerationCandidates/);
+assert.doesNotMatch(optionsSource, /renderGenerationCandidates/);
 
 console.log('studio session flow checks passed');

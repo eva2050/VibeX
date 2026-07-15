@@ -403,49 +403,6 @@ body {
   font-size: 12px;
 }
 
-.generation-candidates {
-  margin-top: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--bg-color);
-}
-
-.generation-candidates summary {
-  cursor: pointer;
-  padding: 10px 12px;
-  color: var(--text-sub);
-  font-size: 12px;
-}
-
-.generation-candidate-list {
-  display: grid;
-  gap: 8px;
-  padding: 0 10px 10px;
-}
-
-.generation-candidate-option {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: #fff;
-  color: var(--text-main);
-  text-align: left;
-  white-space: pre-wrap;
-  cursor: pointer;
-}
-
-.generation-candidate-option.is-selected {
-  border-color: var(--text-main);
-}
-
-.generation-candidate-score {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--text-sub);
-  font-size: 11px;
-}
-
 .generation-actions {
   display: flex;
   gap: 8px;

@@ -12,14 +12,20 @@ const TEMPLATE_PATTERNS = [
   /划重点|冷知识|你发现了吗/
 ];
 
+const LECTURE_OPENING_PATTERN = /^(?:真正重要的是|真正的问题是|本质上|说到底|归根结底|记住|你要明白|大多数人|很多人之所以)/;
+const PAIRED_SLOGAN_PATTERN = /[^。！？\n]{1,18}决定[^。！？\n]{1,20}[，,；;][^。！？\n]{1,18}决定/;
+const DIRECTIVE_PATTERN = /你(?:应该|必须|一定要|要|得|千万)/g;
+
 function buildChineseJudgeInstruction(diagnosis = {}) {
   return [
     '[中文 X Post Skill 独立评审]',
     '只返回有效 JSON。使用自然中文 X 表达标准，不使用通用作文标准。',
+    '先看具体证据是否在观点前出现：数字、人物、动作、产品行为、对话或过程至少有一个来自素材；再看观点是否由这些证据自然长出来。',
     '评分：观点与确定性忠实度 fidelity 25；具体信息 specificity 20；自然中文 naturalness 20；首句 hook 15；收藏/转发/讨论价值 audienceValue 10；账号匹配 accountFit 10。',
-    '硬失败不能被总分抵消：新增事实、伪造经历、跑题、错语言、确定性升级、强套原文不支持的结构、明显营销号腔或翻译腔。',
+    '自然中文重点检查：像本人分享观察，不像老师给所有人上课；允许口语和粗糙，不奖励对仗金句、宏大总结或精致空话。',
+    '硬失败不能被总分抵消：新增事实、伪造经历、跑题、错语言、确定性升级、强套原文不支持的结构、明显营销号腔、翻译腔或说教腔。',
     `原素材类型：${diagnosis.family || 'unknown'}；确定性：${diagnosis.certainty || 'unknown'}。`,
-    '返回格式：{"selectedCandidateId":"candidate-a","scores":[{"id":"candidate-a","total":0,"fidelity":0,"specificity":0,"naturalness":0,"hook":0,"audienceValue":0,"accountFit":0,"hardFailures":[]}],"rationale":""}'
+    '本次只有一篇初稿。返回格式：{"selectedCandidateId":"candidate-a","scores":[{"id":"candidate-a","total":0,"fidelity":0,"specificity":0,"naturalness":0,"hook":0,"audienceValue":0,"accountFit":0,"hardFailures":[]}],"rationale":""}'
   ].join('\n');
 }
 
@@ -28,6 +34,8 @@ function buildChineseRepairInstruction(diagnosis = {}, failures = []) {
     '[中文 X Post Skill 修复]',
     `只修复失败项：${JSON.stringify(Array.isArray(failures) ? failures : [failures])}。`,
     '不得借修复之名增加新事实、经历、对象、数字或更强结论。',
+    '如果开头像老师下结论，改成素材中最具体的事件、动作或现象；让判断出现在证据之后。',
+    '删除对仗金句和“你应该”式命令，把它改成个人观察或有边界的判断。',
     diagnosis.certainty === 'uncertain' ? '恢复原素材的怀疑或可能语气。' : '',
     '返回修复后的正文，不解释。'
   ].filter(Boolean).join('\n');
@@ -62,6 +70,14 @@ function hasInventedFirstPerson(output = '', diagnosis = {}) {
   return /(?:我|我们).{0,8}(?:连续.{0,8}(?:做|用|试)|亲自|做了|用了|试了|花了|上线了|发布了|踩过|最后发现)/.test(output);
 }
 
+function hasLectureTone(output = '') {
+  const text = String(output || '').trim();
+  const directives = text.match(DIRECTIVE_PATTERN) || [];
+  return LECTURE_OPENING_PATTERN.test(text)
+    || PAIRED_SLOGAN_PATTERN.test(text)
+    || directives.length >= 2;
+}
+
 function evaluateChinesePostOutput(source = '', output = '', diagnosis = {}) {
   const text = String(output || '').trim();
   const issues = [];
@@ -71,6 +87,7 @@ function evaluateChinesePostOutput(source = '', output = '', diagnosis = {}) {
   if (hasCertaintyEscalation(text, diagnosis)) issues.push('certainty_escalation');
   if (hasInventedFirstPerson(text, diagnosis)) issues.push('invented_first_person');
   if (TEMPLATE_PATTERNS.some(pattern => pattern.test(text))) issues.push('template_tone');
+  if (hasLectureTone(text)) issues.push('lecture_tone');
   const sourceLength = Math.max(1, normalizedLength(source));
   const maxRatio = Number(diagnosis.targetLength?.maxRatio) || 1.5;
   if (normalizedLength(text) / sourceLength > maxRatio) issues.push('excessive_expansion');
@@ -83,11 +100,15 @@ function evaluateChinesePostOutput(source = '', output = '', diagnosis = {}) {
 
 export {
   TEMPLATE_PATTERNS,
+  DIRECTIVE_PATTERN,
+  LECTURE_OPENING_PATTERN,
+  PAIRED_SLOGAN_PATTERN,
   buildChineseJudgeInstruction,
   buildChineseRepairInstruction,
   evaluateChinesePostOutput,
   hasCertaintyEscalation,
   hasInventedFirstPerson,
+  hasLectureTone,
   hasUnsupportedEntities,
   hasUnsupportedNumbers
 };

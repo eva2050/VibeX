@@ -2,19 +2,13 @@ import { handleLLMMessage } from './llmHandler.js';
 import { handleAutomationMessage } from './automationHandler.js';
 import { handleQueueMessage } from './queueHandler.js';
 import { handleUiMessage } from './uiHandler.js';
-import { handleBenchmarkMessage } from './benchmarkHandler.js';
 
 export function setupMessageRouter(context) {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     let handled = false;
     let isAsync = false;
 
-    if (['startChinesePostBenchmark', 'runNextChinesePostBenchmarkStep', 'getChinesePostBenchmark', 'submitChinesePostBenchmarkReview', 'resetChinesePostBenchmark'].includes(request.action)) {
-      isAsync = handleBenchmarkMessage(request, sender, sendResponse);
-      handled = true;
-    }
-    // LLM Handler
-    else if (['testApiConnection', 'generateReply', 'magicPrompt', 'extractAndRewrite', 'rewriteTweet', 'agentChat'].includes(request.action)) {
+    if (['testApiConnection', 'generateReply', 'magicPrompt', 'extractAndRewrite', 'rewriteTweet', 'agentChat'].includes(request.action)) {
       isAsync = handleLLMMessage(request, sender, sendResponse, context);
       handled = true;
     }

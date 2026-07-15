@@ -4,14 +4,11 @@ import { assessStudioOutputQuality } from './studioQuality.js';
 const STUDIO_PASS_SCORE = 82;
 
 const REWRITE_CANDIDATE_BRIEFS = [
-  'Faithful compression with a concrete first-line hook. Preserve the source claim and do not add facts.',
-  'Use contrast or variable reversal without changing the source claim, topic, or factual certainty.',
-  'Use a natural observation or short narrative structure without adding people, products, data, or events.'
+  'Write one publication-ready draft. Start from a concrete signal already present in the source, preserve its claim and certainty, and add no facts.'
 ];
 
 const REPLY_CANDIDATE_BRIEFS = [
-  'Respond with one specific, relevant observation that gives the author something useful to reply to.',
-  'Use a different concrete angle without repeating, summarizing, flattering, or overclaiming.'
+  'Write one specific, relevant reply that gives the author something useful to respond to without summarizing, flattering, or overclaiming.'
 ];
 
 function cleanModelText(value = '') {
@@ -30,12 +27,12 @@ function getCandidateBriefs(promptType = '') {
 
 function getCandidatePlans(input = {}, contentSkill = null, diagnosis = null) {
   if (contentSkill && diagnosis) {
-    return contentSkill.selectCandidateStrategies(diagnosis).map((strategy) => ({
+    return contentSkill.selectCandidateStrategies(diagnosis).slice(0, 1).map((strategy) => ({
       brief: contentSkill.buildCandidateInstruction(strategy, diagnosis),
       strategyId: strategy.id
     }));
   }
-  return getCandidateBriefs(input.promptType).map(brief => ({ brief, strategyId: '' }));
+  return getCandidateBriefs(input.promptType).slice(0, 1).map(brief => ({ brief, strategyId: '' }));
 }
 
 function buildCandidatePrompt(input = {}, brief = '') {
@@ -141,25 +138,26 @@ async function orchestrateStudioGeneration(input = {}, dependencies = {}) {
   const diagnosis = contentSkill ? contentSkill.analyze({ text: input.sourceText }) : null;
   const plans = getCandidatePlans(input, contentSkill, diagnosis);
 
-  onPhase('generating_candidates');
-  const settled = await Promise.allSettled(
-    plans.map(plan => callModel(buildCandidatePrompt(input, plan.brief)))
+  const plan = plans[0] || { brief: '', strategyId: '' };
+  onPhase('generating_draft');
+  let rawDraft = '';
+  try {
+    rawDraft = await callModel(buildCandidatePrompt(input, plan.brief));
+  } catch (error) {
+    throw new Error(`Studio draft call failed: ${error.message}`);
+  }
+  const draft = buildCandidateRecord(
+    rawDraft,
+    0,
+    input,
+    plan.strategyId,
+    contentSkill,
+    diagnosis
   );
-  const candidates = settled.flatMap((entry, index) => {
-    if (entry.status !== 'fulfilled') return [];
-    const candidate = buildCandidateRecord(
-      entry.value,
-      index,
-      input,
-      plans[index]?.strategyId,
-      contentSkill,
-      diagnosis
-    );
-    return candidate.text ? [candidate] : [];
-  });
-  if (!candidates.length) throw new Error('All Studio candidate calls failed');
+  if (!draft.text) throw new Error('Studio draft call failed: empty output');
+  const candidates = [draft];
 
-  onPhase('judging_candidates');
+  onPhase('reviewing_draft');
   const judge = parseJudgeResult(await callModel(buildJudgePrompt(input, candidates, contentSkill, diagnosis)));
   const selected = candidates.find(candidate => candidate.id === judge.selectedCandidateId);
   const selectedScore = judge.scores.find(score => score.id === judge.selectedCandidateId);
@@ -186,7 +184,7 @@ async function orchestrateStudioGeneration(input = {}, dependencies = {}) {
     };
   }
 
-  onPhase('repairing_candidate');
+  onPhase('repairing_draft');
   const repairedText = cleanModelText(await callModel(
     buildRepairPrompt(input, selected, judge, hardFailures, contentSkill, diagnosis)
   ));

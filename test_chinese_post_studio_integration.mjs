@@ -25,16 +25,12 @@ const contentSkill = resolveContentSkill({
 const sourceText = '很多 AI 产品第一次使用很惊艳，但第二次打开时上下文又断了。';
 const model = queuedModel([
   'AI 产品第一次惊艳不难，难的是第二次打开时上下文还能不能接上。',
-  '决定 AI 产品能不能重复使用的，也许不是第一次有多惊艳，而是上下文会不会断。',
-  '第二次打开 AI 产品，上下文又断了：第一次的惊艳很难变成重复使用。',
   JSON.stringify({
     selectedCandidateId: 'candidate-a',
     scores: [
-      { id: 'candidate-a', total: 92, hardFailures: [] },
-      { id: 'candidate-b', total: 88, hardFailures: [] },
-      { id: 'candidate-c', total: 86, hardFailures: [] }
+      { id: 'candidate-a', total: 92, hardFailures: [] }
     ],
-    rationale: '候选 A 最忠实，也最自然。'
+    rationale: '这篇初稿忠实、具体，也没有说教感。'
   })
 ]);
 const result = await orchestrateStudioGeneration({
@@ -46,15 +42,14 @@ const result = await orchestrateStudioGeneration({
 }, model);
 
 assert.deepEqual(result.candidates.map(item => item.strategyId), [
-  'faithful_sharpening',
-  'cognitive_reframe',
-  'concrete_scene'
+  'faithful_sharpening'
 ]);
 assert.equal(result.contentSkill.id, 'zh-x-post');
-assert.equal(result.contentSkill.version, '1.0.0');
+assert.equal(result.contentSkill.version, '1.1.0');
 assert.equal(result.contentFamily, 'product_observation');
-assert.match(model.calls[3], /自然中文 X 表达/);
-assert.equal(model.calls.length, 4);
+assert.match(model.calls[1], /自然中文 X 表达/);
+assert.equal(model.calls.length, 2);
+assert.equal(result.candidates.length, 1);
 
 const session = buildStudioSessionFromResult({
   generationId: 'gen-zh-skill',
@@ -65,21 +60,17 @@ const session = buildStudioSessionFromResult({
   now: 1700000000000
 });
 assert.equal(session.contentSkillId, 'zh-x-post');
-assert.equal(session.contentSkillVersion, '1.0.0');
+assert.equal(session.contentSkillVersion, '1.1.0');
 assert.equal(session.contentFamily, 'product_observation');
 assert.deepEqual(session.candidateStrategyIds, [
-  'faithful_sharpening',
-  'cognitive_reframe',
-  'concrete_scene'
+  'faithful_sharpening'
 ]);
-const switchedSession = selectGenerationCandidate(session, 'candidate-b', 1700000000010);
+const switchedSession = selectGenerationCandidate(session, 'candidate-a', 1700000000010);
 assert.equal(switchedSession.contentSkillId, 'zh-x-post');
-assert.equal(switchedSession.contentSkillVersion, '1.0.0');
+assert.equal(switchedSession.contentSkillVersion, '1.1.0');
 
 const englishModel = queuedModel([
   'A repeated workflow matters more than a demo.',
-  'The demo matters less than repeated use.',
-  'Repeat use is stronger evidence than a polished demo.',
   JSON.stringify({
     selectedCandidateId: 'candidate-a',
     scores: [{ id: 'candidate-a', total: 90, hardFailures: [] }],
@@ -97,11 +88,10 @@ assert.equal(englishResult.contentSkill, undefined);
 assert.equal(englishResult.candidates.some(item => item.strategyId), false);
 
 const replyModel = queuedModel([
-  '这也说明重复使用比第一次惊艳更重要。',
   '上下文不断，用户才有继续对话的理由。',
   JSON.stringify({
-    selectedCandidateId: 'candidate-b',
-    scores: [{ id: 'candidate-b', total: 90, hardFailures: [] }],
+    selectedCandidateId: 'candidate-a',
+    scores: [{ id: 'candidate-a', total: 90, hardFailures: [] }],
     rationale: '具体。'
   })
 ]);

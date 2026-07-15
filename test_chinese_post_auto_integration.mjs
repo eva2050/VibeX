@@ -25,7 +25,7 @@ const autoPostPrompt = buildAutoPostPrompt({
   contentSkillContext: skillContext.prompt
 });
 
-assert.match(autoPostPrompt, /zh-x-post@1\.0\.0/);
+assert.match(autoPostPrompt, /zh-x-post@1\.1\.0/);
 assert.match(autoPostPrompt, /中文 X 内容诊断/);
 assert.match(autoPostPrompt, /中文 X Post Skill 独立评审/);
 assert.doesNotMatch(autoPostPrompt, /studio_reply|auto_relationship/);
@@ -33,7 +33,7 @@ assert.doesNotMatch(autoPostPrompt, /studio_reply|auto_relationship/);
 const metadata = buildAutoPostSkillMetadata(contentSkill, '这周删掉了自动发布里一个不可靠的步骤。');
 assert.deepEqual(metadata, {
   contentSkillId: 'zh-x-post',
-  contentSkillVersion: '1.0.0',
+  contentSkillVersion: '1.1.0',
   contentFamily: 'build_in_public'
 });
 

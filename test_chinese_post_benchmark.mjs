@@ -36,20 +36,12 @@ const outputs = [{
     {
       strategyId: 'faithful_sharpening',
       text: 'AI 产品第一次惊艳不难，难的是让上下文接得上，让用户愿意第二次回来。'
-    },
-    {
-      strategyId: 'cognitive_reframe',
-      text: '决定 AI 产品重复使用的，可能不是功能数量，而是上下文能不能连续。'
-    },
-    {
-      strategyId: 'concrete_scene',
-      text: '第二次打开还要重新解释上下文，再多功能也很难变成用户会重复使用的 AI 产品。'
     }
   ]
 }];
 const report = evaluateChinesePostBenchmark([fixture], outputs);
 assert.equal(report.fixtureCount, 1);
-assert.equal(report.candidateCount, 3);
+assert.equal(report.candidateCount, 1);
 assert.equal(report.unsupportedFactCount, 0);
 assert.equal(report.claimPreservationRate, 1);
 assert.equal(report.templateHitRate, 0);

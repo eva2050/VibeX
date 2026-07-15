@@ -5,7 +5,6 @@ import { POST_CONTENT_MODE, POST_ORIGIN, POST_STATUS, normalizePostRecord } from
 import {
   buildVaultRecordFromSession,
   recordGenerationAction,
-  selectGenerationCandidate,
   updateGenerationSessionText
 } from '../core/generationAttribution.js';
 
@@ -102,47 +101,6 @@ export async function saveCurrentGenerationToVault() {
       });
     });
   });
-}
-
-export function renderGenerationCandidates(session = currentGenerationSession) {
-  const details = document.getElementById('generation-candidates');
-  const list = document.getElementById('generation-candidate-list');
-  if (!details || !list) return;
-  list.textContent = '';
-  const candidates = Array.isArray(session?.candidates) ? session.candidates : [];
-  if (candidates.length < 2) {
-    details.classList.add('hidden');
-    details.open = false;
-    return;
-  }
-  const scoreById = new Map(
-    (session?.judge?.scores || []).map(score => [score.id, Number(score.total) || 0])
-  );
-  candidates.forEach((candidate) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'generation-candidate-option';
-    if (candidate.id === session.selectedCandidateId) button.classList.add('is-selected');
-    const score = document.createElement('span');
-    score.className = 'generation-candidate-score';
-    score.textContent = `${candidate.id} · ${scoreById.get(candidate.id) || 0}/100`;
-    button.appendChild(score);
-    button.appendChild(document.createTextNode(candidate.text || ''));
-    button.addEventListener('click', async () => {
-      currentGenerationSession = selectGenerationCandidate(
-        currentGenerationSession,
-        candidate.id,
-        Date.now()
-      );
-      const resultBox = document.getElementById('generation-result');
-      if (resultBox) resultBox.textContent = currentGenerationSession.finalText;
-      originalAIOutput = currentGenerationSession.selectedText;
-      await upsertStoredGenerationSession(currentGenerationSession);
-      renderGenerationCandidates(currentGenerationSession);
-    });
-    list.appendChild(button);
-  });
-  details.classList.remove('hidden');
 }
 
 // Helper: Toast notification
@@ -485,9 +443,9 @@ function setupContextListener() {
       if (request.streamId && request.streamId !== window.currentStreamId) return;
       const phase = document.getElementById('studio-generation-phase');
       const labels = {
-        generating_candidates: t('studio_phase_generating', 'Generating candidates…'),
-        judging_candidates: t('studio_phase_judging', 'Reviewing candidates…'),
-        repairing_candidate: t('studio_phase_repairing', 'Repairing the best draft…'),
+        generating_draft: t('studio_phase_generating', 'Generating draft…'),
+        reviewing_draft: t('studio_phase_judging', 'Reviewing draft…'),
+        repairing_draft: t('studio_phase_repairing', 'Repairing draft…'),
         complete: t('studio_phase_ready', 'Ready'),
         failed: t('studio_phase_failed', 'Generation failed')
       };
@@ -557,7 +515,7 @@ export function executeMagicAction(actionType, isRegenerate = false) {
   const phase = document.getElementById('studio-generation-phase');
   if (phase) phase.textContent = isUrl
     ? t('studio_phase_extracting', 'Extracting source…')
-    : t('studio_phase_generating', 'Generating candidates…');
+    : t('studio_phase_generating', 'Generating draft…');
 
   const badgesContainer = document.getElementById('generation-quality-badges');
   if (badgesContainer) {
@@ -605,7 +563,6 @@ export function executeMagicAction(actionType, isRegenerate = false) {
         currentGenerationSession = response.generationSession || null;
         if (currentGenerationSession) {
           originalAIOutput = currentGenerationSession.selectedText || response.result;
-          renderGenerationCandidates(currentGenerationSession);
         }
         addLog('task_completed_length', 'system', [response.result.length]);
 
