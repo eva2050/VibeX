@@ -11,7 +11,7 @@ const studioSkill = resolveContentSkill({
   objective: 'studio_rewrite'
 });
 assert.equal(studioSkill.id, 'zh-x-post');
-assert.equal(studioSkill.version, '1.2.0');
+assert.equal(studioSkill.version, '1.3.0');
 assert.equal(Object.isFrozen(studioSkill), true);
 
 const autoSkill = resolveContentSkill({

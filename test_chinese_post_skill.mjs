@@ -171,6 +171,6 @@ const groundedTest = ZH_POST_SKILL.evaluateDeterministically(
 );
 assert.equal(groundedTest.approved, true);
 
-assert.equal(ZH_POST_SKILL.version, '1.2.0');
+assert.equal(ZH_POST_SKILL.version, '1.3.0');
 
 console.log('Chinese post skill checks passed');

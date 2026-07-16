@@ -12,7 +12,7 @@ import {
 
 const ZH_POST_SKILL = registerContentSkill({
   id: 'zh-x-post',
-  version: '1.2.0',
+  version: '1.3.0',
   language: 'zh',
   format: 'post',
   objectives: ['studio_rewrite', 'auto_post'],
